@@ -1,9 +1,10 @@
-/* Poker Tournament (Step 1)
+/* Poker Tournament (Step 1, fixed menu + no forced autostart)
    - fullscreen table
-   - auto hands (no Start/Next)
+   - auto hands (no Start/Next buttons)
+   - menu always clickable + pauses timer
+   - after nick: open menu first, start tournament only after menu close
    - 15s turn timer: auto-check if possible else auto-fold
    - separate buttons: fold/check/call/raise + raise modal
-   - simple bot logic (enough for now)
 */
 
 const START_CHIPS = 1000;
@@ -39,6 +40,9 @@ let turnLeft = TURN_SECONDS_DEFAULT;
 let turnTimerId = null;
 let botTimerId = null;
 let streetPauseId = null;
+
+let menuOpen = false;
+let pendingAutoStartAfterMenu = false;
 
 const $ = (id)=>document.getElementById(id);
 
@@ -96,6 +100,10 @@ function load(n){
   try { return JSON.parse(raw); } catch { return null; }
 }
 
+/* ---------- Utils ---------- */
+function show(el, yes){ el.style.display = yes ? "flex" : "none"; }
+function clamp(x,a,b){ return Math.max(a, Math.min(b, x)); }
+
 /* ---------- Deck ---------- */
 function newDeck(){
   const d = [];
@@ -125,7 +133,7 @@ function nextNotOutIndex(from){
 }
 function onlyOneLeftInHand(){ return inHandPlayers().length === 1; }
 
-/* ---------- Evaluator (same as earlier simple 7-card) ---------- */
+/* ---------- Evaluator (simple 7-card) ---------- */
 function straightHigh(uniqueRanksDesc){
   const set = new Set(uniqueRanksDesc);
   if(set.has(14) && set.has(5) && set.has(4) && set.has(3) && set.has(2)) return 5;
@@ -238,6 +246,7 @@ function startTurnTimer(){
   turnLeft = turnSeconds;
   elTurnTimer.textContent = String(turnLeft);
   turnTimerId = setInterval(()=>{
+    if(menuOpen) return; // menu pauses countdown visually
     turnLeft--;
     elTurnTimer.textContent = String(Math.max(0,turnLeft));
     if(turnLeft<=0){
@@ -248,18 +257,14 @@ function startTurnTimer(){
 }
 function onTurnTimeout(){
   if(!handInProgress) return;
-  if(players[current].isBot) return; // bots don't timeout
-  // auto-check if possible, else fold
+  if(players[current].isBot) return;
   const you = players[0];
   const need = Math.max(0, toCall - you.bet);
-  if(need===0){
-    playerCheck(0, true);
-  } else {
-    playerFold(0, true);
-  }
+  if(need===0) playerCheck(0, true);
+  else playerFold(0, true);
 }
 
-/* ---------- Game Flow ---------- */
+/* ---------- Tournament ---------- */
 function cleanupElims(){
   for(const p of players){
     if(!p.out && p.chips<=0){
@@ -287,14 +292,16 @@ function ensureTournament(){
 }
 
 function startHandAuto(){
+  if(menuOpen) return; // don't start hands while in menu
+
   cleanupElims();
   const w = tournamentWinner();
   if(w){
-    elMsg.textContent = `🏆 CHAMPION: ${w.name}! (авто-новый турнир через 2 сек)`;
+    elMsg.textContent = `🏆 CHAMPION: ${w.name}! (новый турнир через 2 сек)`;
     render();
     save();
-    // start a new tournament automatically
     setTimeout(()=>{
+      if(menuOpen) return;
       players.forEach(p=>{ p.out=false; p.folded=false; p.bet=0; p.hand=[]; p.chips=START_CHIPS; });
       dealer=0; stage="IDLE"; pot=0; board=[]; toCall=0; raisesThisRound=0;
       handInProgress=false;
@@ -338,7 +345,7 @@ function pauseThen(fn, text){
   if(streetPauseId) clearTimeout(streetPauseId);
   elMsg.textContent = text;
   renderHUD();
-  streetPauseId = setTimeout(fn, STREET_PAUSE_MS);
+  streetPauseId = setTimeout(()=>{ if(!menuOpen) fn(); }, STREET_PAUSE_MS);
 }
 
 function advanceStage(){
@@ -381,7 +388,7 @@ function doShowdown(){
     w.chips += share;
     if(rem>0){ w.chips += 1; rem--; }
   }
-  elMsg.textContent = `Победитель: ${winners.map(w=>w.name).join(", ")} (банк разделён)`;
+  elMsg.textContent = `Победитель: ${winners.map(w=>w.name).join(", ")}`;
   pot=0;
 
   handInProgress=false;
@@ -391,8 +398,7 @@ function doShowdown(){
   save();
   render();
 
-  // auto next hand
-  setTimeout(()=>startHandAuto(), 1200);
+  setTimeout(()=>{ if(!menuOpen) startHandAuto(); }, 1200);
 }
 
 function awardPot(idx, reason){
@@ -404,10 +410,10 @@ function awardPot(idx, reason){
   cleanupElims();
   save();
   render();
-  setTimeout(()=>startHandAuto(), 1200);
+  setTimeout(()=>{ if(!menuOpen) startHandAuto(); }, 1200);
 }
 
-/* ---------- Player actions ---------- */
+/* ---------- Actions ---------- */
 function playerFold(i, byTimeout=false){
   clearTurnTimer();
   players[i].folded=true;
@@ -426,7 +432,7 @@ function playerCheck(i, byTimeout=false){
   clearTurnTimer();
   const p=players[i];
   const need=Math.max(0,toCall-p.bet);
-  if(need!==0) return; // not allowed
+  if(need!==0) return;
   elMsg.textContent = byTimeout ? `${p.name} auto-check (timeout)` : `${p.name} checks`;
   current = nextActiveIndex(i);
   render();
@@ -466,7 +472,7 @@ function playerRaiseTo(i, raiseTo){
   tick();
 }
 
-/* ---------- Bot logic ---------- */
+/* ---------- Bots ---------- */
 function botDecision(i){
   const p=players[i];
   const need=Math.max(0,toCall-p.bet);
@@ -501,7 +507,8 @@ function botDecision(i){
   return "CALL";
 }
 function botAct(){
-  if(!handInProgress) return;
+  if(!handInProgress || menuOpen) return;
+
   if(players[current].out || players[current].folded) current = nextActiveIndex(current);
 
   if(onlyOneLeftInHand()){
@@ -522,7 +529,7 @@ function botAct(){
       if(e.cat>=4) target+=BIG_BLIND*3;
       if(e.cat>=6) target+=BIG_BLIND*5;
     }
-    target = Math.max(min, Math.min(max, target));
+    target = clamp(target, min, max);
     playerRaiseTo(current, target);
   } else {
     playerCall(current);
@@ -534,12 +541,13 @@ function tick(){
   clearTimeout(botTimerId);
   clearTurnTimer();
 
+  if(menuOpen) { updateButtons(); return; }
+
   if(!handInProgress || stage==="IDLE" || stage==="SHOWDOWN"){
     updateButtons();
     return;
   }
 
-  // skip dead/folded
   if(players[current].out || players[current].folded){
     current = nextActiveIndex(current);
   }
@@ -547,19 +555,17 @@ function tick(){
   renderHUD();
   updateButtons();
 
-  // human
   if(!players[current].isBot){
     elMsg.textContent = "Твой ход.";
     startTurnTimer();
     return;
   }
 
-  // bot
   elMsg.textContent = "Бот думает…";
   botTimerId = setTimeout(()=>botAct(), BOT_THINK_MS);
 }
 
-/* ---------- UI Render ---------- */
+/* ---------- Render ---------- */
 function renderHUD(){
   elNick.textContent = nick ?? "-";
   elStage.textContent = stage;
@@ -567,10 +573,6 @@ function renderHUD(){
   elTurnName.textContent = players[current]?.name ?? "-";
   elStack.textContent = String(players[0]?.chips ?? 0);
   elTurnTimer.textContent = String(turnLeft);
-  elToCallText();
-}
-function elToCallText(){
-  // show "to call" via stage pill? not separate: keep in message/timer only
 }
 
 function makeCardEl(text, hidden){
@@ -649,7 +651,7 @@ function render(){
 
 function updateButtons(){
   const you = players[0];
-  const yourTurn = tournamentStarted && handInProgress && current===0 && you && !you.folded && !you.out;
+  const yourTurn = tournamentStarted && handInProgress && current===0 && you && !you.folded && !you.out && !menuOpen;
 
   btnFold.disabled = !yourTurn;
   btnRaise.disabled = !yourTurn || raisesThisRound>=MAX_RAISES_PER_ROUND;
@@ -662,8 +664,9 @@ function updateButtons(){
 /* ---------- Raise Modal ---------- */
 function openRaiseModal(){
   const you=players[0];
-  const min = Math.max(0, Math.min(minRaiseTo(), you.bet+you.chips));
+  const min = clamp(minRaiseTo(), 0, you.bet+you.chips);
   const max = you.bet + you.chips;
+
   raiseSlider.min = String(min);
   raiseSlider.max = String(max);
   raiseSlider.value = String(min);
@@ -674,7 +677,7 @@ function openRaiseModal(){
   show(raiseOverlay,true);
 }
 function closeRaiseModal(){ show(raiseOverlay,false); }
-function show(el, yes){ el.style.display = yes ? "flex" : "none"; }
+
 function syncRaiseFromSlider(){
   const v=Number(raiseSlider.value);
   raiseToLabel.textContent=String(v);
@@ -682,18 +685,42 @@ function syncRaiseFromSlider(){
 }
 function syncRaiseFromInput(){
   const you=players[0];
-  const min = Math.max(0, Math.min(minRaiseTo(), you.bet+you.chips));
+  const min = clamp(minRaiseTo(), 0, you.bet+you.chips);
   const max = you.bet + you.chips;
   let v=Number(raiseInput.value||min);
-  v = Math.max(min, Math.min(max, v));
+  v = clamp(v, min, max);
   raiseInput.value=String(v);
   raiseSlider.value=String(v);
   raiseToLabel.textContent=String(v);
 }
 
+/* ---------- Menu open/close ---------- */
+function openMenu(){
+  menuOpen = true;
+  clearTurnTimer();
+  show(menuOverlay,true);
+  // show timer frozen
+  renderHUD();
+  updateButtons();
+}
+function closeMenu(){
+  show(menuOverlay,false);
+  menuOpen = false;
+
+  // If first time after nick and no hand yet -> start tournament now
+  if(pendingAutoStartAfterMenu && !handInProgress){
+    pendingAutoStartAfterMenu = false;
+    setTimeout(()=>startHandAuto(), 200);
+    return;
+  }
+
+  // continue normal flow
+  tick();
+}
+
 /* ---------- Events ---------- */
-btnMenu.addEventListener("click", ()=>show(menuOverlay,true));
-btnCloseMenu.addEventListener("click", ()=>show(menuOverlay,false));
+btnMenu.addEventListener("click", openMenu);
+btnCloseMenu.addEventListener("click", closeMenu);
 
 btnFold.addEventListener("click", ()=> { if(current===0) playerFold(0); });
 btnCheck.addEventListener("click", ()=> { if(current===0) playerCheck(0); });
@@ -758,12 +785,10 @@ nickOk.addEventListener("click", ()=>{
   show(nickOverlay,false);
   render();
 
-  // auto-start flow
-  if(!handInProgress){
-    setTimeout(()=>startHandAuto(), 400);
-  } else {
-    tick();
-  }
+  // IMPORTANT: don't auto-start immediately
+  pendingAutoStartAfterMenu = !handInProgress; // start after menu close
+  openMenu();
+
   save();
 });
 nickInput.addEventListener("keydown", (e)=>{ if(e.key==="Enter") nickOk.click(); });
@@ -771,7 +796,7 @@ nickInput.addEventListener("keydown", (e)=>{ if(e.key==="Enter") nickOk.click();
 /* Boot */
 function boot(){
   openNick();
-  // placeholder seats so UI doesn't look empty before nick
+  // placeholder seats before nick
   players = [
     {name:"YOU",isBot:false,chips:0,bet:0,folded:false,out:false,hand:[]},
     {name:"BOT1",isBot:true,chips:0,bet:0,folded:false,out:false,hand:[]},
