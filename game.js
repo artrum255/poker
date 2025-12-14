@@ -1,110 +1,103 @@
-/* Poker Tournament v3.2 (stable rewrite)
-   Goals:
-   - Resume ALWAYS deals if no hand; never self-pauses
-   - Pause truly freezes everything (timers + pending callbacks)
-   - Streets correct: PREFLOP -> FLOP(3) -> TURN -> RIVER -> SHOWDOWN
-   - Win% MonteCarlo vs remaining opponents only (bots unknown)
-   - Neon highlight best 5 + hand name + win%
+/* Poker Tournament v3.1 FIXPACK (stable)
+   FIX:
+   - Resume всегда раздаёт (и не “самопаузится”)
+   - Pause реально замораживает всё (таймеры/боты/паузы улиц)
+   - bestOf7 не падает до флопа (когда карт < 5)
+   - Правильные улицы: PREFLOP -> FLOP(3) -> TURN(1) -> RIVER(1) -> SHOWDOWN
+   - Win% MC против оставшихся оппов
+   - Подсветка лучшей 5ки + название руки + win%
    - Storage key v31
-   - Defensive state-machine + runToken to avoid stale timers bugs
 */
 
 "use strict";
 
-/* -------------------- Config -------------------- */
 const START_CHIPS = 1000;
 const SMALL_BLIND = 10;
-const BIG_BLIND   = 20;
-const BOT_COUNT   = 5;
-
+const BIG_BLIND = 20;
+const BOT_COUNT = 5;
 const MAX_RAISES_PER_ROUND = 4;
 
 const TURN_SECONDS_OPTIONS = [5,10,15,20];
 const TURN_SECONDS_DEFAULT = 15;
 
-const BOT_THINK_MS   = 450;
+const BOT_THINK_MS = 450;
 const STREET_PAUSE_MS = 850;
 
-const MC_ITERS_PREFLOP  = 350;
+const MC_ITERS_PREFLOP = 350;
 const MC_ITERS_POSTFLOP = 250;
 
 const SUITS = ["♣","♦","♥","♠"];
 const RANKS = ["2","3","4","5","6","7","8","9","T","J","Q","K","A"];
 const RVAL  = Object.fromEntries(RANKS.map((r,i)=>[r, i+2]));
 
-/* -------------------- State -------------------- */
 let nick = null;
 let saveKey = null;
 
-let players = [];   // [ {name,isBot,chips,bet,folded,out,acted,hand:[{r,s}]} ]
+let players = [];
 let deck = [];
-let board = [];     // 0..5 cards
+let board = [];
 let pot = 0;
-
-let stage = "IDLE"; // IDLE,PREFLOP,FLOP,TURN,RIVER,SHOWDOWN
+let stage = "IDLE"; // IDLE, PREFLOP, FLOP, TURN, RIVER, SHOWDOWN
 let dealer = 0, sb = 1, bb = 2;
 let current = 0;
 let toCall = 0;
 let raisesThisRound = 0;
-
 let handInProgress = false;
 let tournamentStarted = false;
 
 let turnSeconds = TURN_SECONDS_DEFAULT;
 let turnLeft = TURN_SECONDS_DEFAULT;
-
-let menuOpen = false;
-let paused = true;
-
-/* Stale-timer protection: every time we "stopAll", we bump token.
-   Any old callbacks check token before acting. */
-let runToken = 1;
 let turnTimerId = null;
 let botTimerId = null;
 let streetPauseId = null;
 
-/* Hero UI */
+let menuOpen = false;
+let paused = true;
+
+// stale-timer protection
+let runToken = 1;
+function bumpToken(){ runToken = (runToken + 1) | 0; if(runToken<=0) runToken = 1; }
+
 let heroComboText = "";
 let heroWinPct = null;
 let heroHighlightKeys = new Set();
 
-/* -------------------- DOM -------------------- */
 const $ = (id)=>document.getElementById(id);
 
-const elNick      = $("nick");
-const elStack     = $("stack");
-const elPot       = $("pot");
-const elStage     = $("stage");
-const elTurnName  = $("turnName");
+const elNick = $("nick");
+const elStack = $("stack");
+const elPot = $("pot");
+const elStage = $("stage");
+const elTurnName = $("turnName");
 const elTurnTimer = $("turnTimer");
-const elBoard     = $("board");
-const elSeats     = $("seats");
-const elMsg       = $("msg");
+const elBoard = $("board");
+const elSeats = $("seats");
+const elMsg = $("msg");
 
-const btnMenu  = $("btnMenu");
-const btnFold  = $("btnFold");
+const btnMenu = $("btnMenu");
+const btnFold = $("btnFold");
 const btnCheck = $("btnCheck");
-const btnCall  = $("btnCall");
+const btnCall = $("btnCall");
 const btnRaise = $("btnRaise");
 
 const nickOverlay = $("nickOverlay");
-const nickInput   = $("nickInput");
-const nickOk      = $("nickOk");
+const nickInput = $("nickInput");
+const nickOk = $("nickOk");
 
-const menuOverlay   = $("menuOverlay");
-const btnCloseMenu  = $("btnCloseMenu");
+const menuOverlay = $("menuOverlay");
+const btnCloseMenu = $("btnCloseMenu");
 
-const raiseOverlay     = $("raiseOverlay");
-const raiseSlider      = $("raiseSlider");
-const raiseToLabel     = $("raiseToLabel");
-const raiseInput       = $("raiseInput");
-const btnRaiseConfirm  = $("btnRaiseConfirm");
-const btnRaiseClose    = $("btnRaiseClose");
-const btnRaiseMin      = $("btnRaiseMin");
-const btnRaiseHalf     = $("btnRaiseHalf");
-const btnRaiseAll      = $("btnRaiseAll");
+const raiseOverlay = $("raiseOverlay");
+const raiseSlider = $("raiseSlider");
+const raiseToLabel = $("raiseToLabel");
+const raiseInput = $("raiseInput");
+const btnRaiseConfirm = $("btnRaiseConfirm");
+const btnRaiseClose = $("btnRaiseClose");
+const btnRaiseMin = $("btnRaiseMin");
+const btnRaiseHalf = $("btnRaiseHalf");
+const btnRaiseAll = $("btnRaiseAll");
 
-/* -------------------- CSS inject -------------------- */
+/* ---------- extra CSS ---------- */
 (function injectExtraCSS(){
   const css = `
   .card.neon{
@@ -156,13 +149,8 @@ const btnRaiseAll      = $("btnRaiseAll");
   document.head.appendChild(style);
 })();
 
-/* -------------------- Persistence -------------------- */
+/* ---------- Persistence ---------- */
 function keyForNick(n){ return `poker_step1_v31_${String(n||"").toLowerCase()}`; }
-
-function safeClone(obj){
-  try { return structuredClone(obj); }
-  catch { return JSON.parse(JSON.stringify(obj)); }
-}
 
 function save(){
   if(!saveKey) return;
@@ -176,8 +164,8 @@ function save(){
       handInProgress, tournamentStarted
     }
   };
-  try { localStorage.setItem(saveKey, JSON.stringify(state)); } catch {}
-  try { localStorage.setItem("poker_last_nick", nick); } catch {}
+  localStorage.setItem(saveKey, JSON.stringify(state));
+  localStorage.setItem("poker_last_nick", nick);
 }
 
 function load(n){
@@ -186,71 +174,10 @@ function load(n){
   try { return JSON.parse(raw); } catch { return null; }
 }
 
-function sanitizeLoadedState(st){
-  if(!st || typeof st !== "object") return null;
-  const t = st.tournament;
-  if(!t || typeof t !== "object") return null;
-
-  // Minimal defaults:
-  const out = {
-    version: 31,
-    nick: String(st.nick || nick || "YOU"),
-    turnSeconds: Number(st.turnSeconds || TURN_SECONDS_DEFAULT),
-    paused: !!st.paused,
-    tournament: {
-      players: Array.isArray(t.players) ? t.players : [],
-      deck: Array.isArray(t.deck) ? t.deck : [],
-      board: Array.isArray(t.board) ? t.board : [],
-      pot: Number(t.pot||0),
-      stage: String(t.stage||"IDLE"),
-      dealer: Number.isFinite(t.dealer) ? t.dealer : 0,
-      sb: Number.isFinite(t.sb) ? t.sb : 1,
-      bb: Number.isFinite(t.bb) ? t.bb : 2,
-      current: Number.isFinite(t.current) ? t.current : 0,
-      toCall: Number(t.toCall||0),
-      raisesThisRound: Number(t.raisesThisRound||0),
-      handInProgress: !!t.handInProgress,
-      tournamentStarted: !!t.tournamentStarted
-    }
-  };
-
-  // Fix invalid stage:
-  const okStages = new Set(["IDLE","PREFLOP","FLOP","TURN","RIVER","SHOWDOWN"]);
-  if(!okStages.has(out.tournament.stage)) out.tournament.stage = "IDLE";
-
-  // Fix players:
-  if(!Array.isArray(out.tournament.players) || out.tournament.players.length === 0){
-    out.tournament.players = [];
-  }
-  // Ensure hero at index 0 exists and is not bot:
-  if(out.tournament.players.length){
-    out.tournament.players[0].isBot = false;
-    out.tournament.players[0].name = out.nick;
-  }
-
-  // Ensure boolean flags:
-  for(const p of out.tournament.players){
-    if(!p) continue;
-    p.name = String(p.name||"PLAYER");
-    p.isBot = !!p.isBot;
-    p.chips = Math.max(0, Number(p.chips||0));
-    p.bet = Math.max(0, Number(p.bet||0));
-    p.folded = !!p.folded;
-    p.out = !!p.out;
-    p.acted = !!p.acted;
-    if(!Array.isArray(p.hand)) p.hand = [];
-    p.hand = p.hand.filter(Boolean).slice(0,2);
-  }
-
-  return out;
-}
-
-/* -------------------- Helpers -------------------- */
-function show(el, yes){ if(el) el.style.display = yes ? "flex" : "none"; }
+/* ---------- Helpers ---------- */
+function show(el, yes){ el.style.display = yes ? "flex" : "none"; }
 function clamp(x,a,b){ return Math.max(a, Math.min(b, x)); }
 function cardKey(c){ return c ? (c.r + c.s) : ""; }
-
-function bumpToken(){ runToken = (runToken + 1) | 0; if(runToken<=0) runToken = 1; }
 
 function stopAllTimers(){
   bumpToken();
@@ -260,6 +187,15 @@ function stopAllTimers(){
   botTimerId=null;
   if(streetPauseId) clearTimeout(streetPauseId);
   streetPauseId=null;
+}
+
+function scheduleTimeout(fn, ms){
+  const token = runToken;
+  return setTimeout(()=>{ if(token===runToken) fn(); }, ms);
+}
+function scheduleInterval(fn, ms){
+  const token = runToken;
+  return setInterval(()=>{ if(token===runToken) fn(); }, ms);
 }
 
 function newDeck(){
@@ -272,40 +208,26 @@ function newDeck(){
   return d;
 }
 
-function inHandPlayers(){ return players.filter(p=>p && !p.out && !p.folded); }
-
+function inHandPlayers(){ return players.filter(p=>!p.out && !p.folded); }
 function nextActiveIndex(from){
   const n = players.length;
-  if(n<=0) return 0;
   for(let k=1;k<=n;k++){
     const i=(from+k)%n;
-    const p=players[i];
-    if(p && !p.out && !p.folded) return i;
+    if(!players[i].out && !players[i].folded) return i;
   }
-  return from % n;
+  return from;
 }
 function nextNotOutIndex(from){
   const n = players.length;
-  if(n<=0) return 0;
   for(let k=1;k<=n;k++){
     const i=(from+k)%n;
-    const p=players[i];
-    if(p && !p.out) return i;
+    if(!players[i].out) return i;
   }
-  return from % n;
+  return from;
 }
 function onlyOneLeftInHand(){ return inHandPlayers().length===1; }
 
-function streetName(st){
-  if(st==="PREFLOP") return "Префлоп…";
-  if(st==="FLOP") return "Флоп…";
-  if(st==="TURN") return "Тёрн…";
-  if(st==="RIVER") return "Ривер…";
-  if(st==="SHOWDOWN") return "Шоудаун…";
-  return "";
-}
-
-/* -------------------- Evaluator best 5 of 7 -------------------- */
+/* ---------- Evaluator best 5 of 7 ---------- */
 function straightHighFromSet(set){
   if(set.has(14)&&set.has(5)&&set.has(4)&&set.has(3)&&set.has(2)) return 5;
   for(let hi=14;hi>=5;hi--){
@@ -315,7 +237,6 @@ function straightHighFromSet(set){
   }
   return 0;
 }
-
 function evaluate5(cards5){
   const ranks = cards5.map(c=>RVAL[c.r]).sort((a,b)=>b-a);
   const suits = cards5.map(c=>c.s);
@@ -358,18 +279,20 @@ function evaluate5(cards5){
   }
   return {cat:0,tiebreak:ranks};
 }
-
 function compareEval(a,b){
   if(a.cat!==b.cat) return a.cat-b.cat;
-  const L=Math.max(a.tiebreak.length,b.tiebreak.length);
-  for(let i=0;i<L;i++){
+  for(let i=0;i<Math.max(a.tiebreak.length,b.tiebreak.length);i++){
     const x=a.tiebreak[i]||0, y=b.tiebreak[i]||0;
     if(x!==y) return x-y;
   }
   return 0;
 }
 
+/* ✅ FIX: safe bestOf7 even when cards < 5 */
 function bestOf7(cards7){
+  if(!cards7 || cards7.length < 5){
+    return { ev: { cat: 0, tiebreak: [] }, best5: [] };
+  }
   let best=null, best5=null;
   const n=cards7.length;
   for(let a=0;a<n-4;a++)
@@ -381,22 +304,23 @@ function bestOf7(cards7){
             const ev=evaluate5(combo);
             if(!best || compareEval(best,ev)<0){ best=ev; best5=combo; }
           }
-  return {ev:best, best5};
+  if(!best) return { ev: { cat: 0, tiebreak: [] }, best5: [] };
+  return { ev: best, best5 };
 }
 
 function catName(cat){
   return ["High Card","Pair","Two Pair","Three of a Kind","Straight","Flush","Full House","Four of a Kind","Straight Flush"][cat]||"Unknown";
 }
 
-/* -------------------- Win% MonteCarlo (unknown bots) -------------------- */
+/* ---------- Win% MC (unknown bot cards) ---------- */
 function monteCarloWinPct(){
   if(!handInProgress) return null;
   const hero=players[0];
-  if(!hero || hero.out || hero.folded || !Array.isArray(hero.hand) || hero.hand.length<2) return null;
+  if(!hero || hero.out || hero.folded || hero.hand.length<2) return null;
 
   const opps = players
     .map((p,idx)=>({p,idx}))
-    .filter(x=>x.idx!==0 && x.p && !x.p.out && !x.p.folded);
+    .filter(x=>x.idx!==0 && !x.p.out && !x.p.folded);
 
   if(opps.length===0) return 100;
 
@@ -452,94 +376,66 @@ function monteCarloWinPct(){
   return Math.round((score/iters)*100);
 }
 
-/* -------------------- Betting round logic -------------------- */
-function resetActedFlags(){ for(const p of players) if(p && !p.out && !p.folded) p.acted=false; }
+/* ---------- Betting-round correctness ---------- */
+function resetActedFlags(){ for(const p of players) p.acted=false; }
 function resetOthersActedAfterRaise(raiserIdx){
   for(let i=0;i<players.length;i++){
-    const p=players[i];
-    if(!p || p.out || p.folded) continue;
-    p.acted = (i===raiserIdx);
+    if(players[i].out || players[i].folded) continue;
+    players[i].acted = (i===raiserIdx);
   }
 }
-
 function bettingRoundComplete(){
   for(const p of inHandPlayers()){
-    if(p.chips===0) continue;      // all-in doesn't need to act
+    if(p.chips===0) continue;
     if(!p.acted) return false;
     if(p.bet!==toCall) return false;
   }
   return true;
 }
+function minRaiseTo(){ return toCall + BIG_BLIND; }
 
-function minRaiseTo(){
-  // simple model: min raise = toCall + BB
-  return toCall + BIG_BLIND;
-}
-
-/* -------------------- Timer / Actions scheduling -------------------- */
-function scheduleTimeout(fn, ms){
-  const token = runToken;
-  return setTimeout(()=>{
-    if(token !== runToken) return;
-    fn();
-  }, ms);
-}
-
-function scheduleInterval(fn, ms){
-  const token = runToken;
-  return setInterval(()=>{
-    if(token !== runToken) return;
-    fn();
-  }, ms);
-}
-
-/* -------------------- Turn timer -------------------- */
+/* ---------- Turn Timer ---------- */
 function startTurnTimer(){
   if(turnTimerId) clearInterval(turnTimerId);
-  turnLeft = turnSeconds;
-  elTurnTimer.textContent = String(turnLeft);
-
-  turnTimerId = scheduleInterval(()=>{
+  turnLeft=turnSeconds;
+  elTurnTimer.textContent=String(turnLeft);
+  turnTimerId=scheduleInterval(()=>{
     if(menuOpen || paused) return;
     turnLeft--;
-    elTurnTimer.textContent = String(Math.max(0, turnLeft));
+    elTurnTimer.textContent=String(Math.max(0,turnLeft));
     if(turnLeft<=0){
-      if(turnTimerId) clearInterval(turnTimerId);
-      turnTimerId=null;
+      clearInterval(turnTimerId); turnTimerId=null;
       onTurnTimeout();
     }
-  }, 1000);
+  },1000);
 }
-
 function onTurnTimeout(){
   if(!handInProgress || paused) return;
-  if(!players[current] || players[current].isBot) return;
-  const you = players[0];
-  const need = Math.max(0, toCall - (you?.bet||0));
-  if(need===0) playerCheck(0, true);
-  else playerFold(0, true);
+  if(players[current].isBot) return;
+  const you=players[0];
+  const need=Math.max(0,toCall-you.bet);
+  if(need===0) playerCheck(0,true);
+  else playerFold(0,true);
 }
 
-/* -------------------- Tournament management -------------------- */
+/* ---------- Tournament ---------- */
 function ensureTournament(){
-  // IMPORTANT: must NOT modify paused here
-  if(tournamentStarted && Array.isArray(players) && players.length===BOT_COUNT+1) return;
+  // IMPORTANT: НЕ трогаем paused здесь (это ломало Resume)
+  if(tournamentStarted && players.length===BOT_COUNT+1) return;
 
-  players = [];
-  players.push({name:nick||"YOU", isBot:false, chips:START_CHIPS, bet:0, folded:false, out:false, acted:false, hand:[]});
+  players=[];
+  players.push({name:nick||"YOU",isBot:false,chips:START_CHIPS,bet:0,folded:false,out:false,acted:false,hand:[]});
   for(let i=1;i<=BOT_COUNT;i++){
-    players.push({name:`BOT${i}`, isBot:true, chips:START_CHIPS, bet:0, folded:false, out:false, acted:false, hand:[]});
+    players.push({name:`BOT${i}`,isBot:true,chips:START_CHIPS,bet:0,folded:false,out:false,acted:false,hand:[]});
   }
-
   dealer=0; sb=1; bb=2;
   stage="IDLE"; board=[]; pot=0; toCall=0; raisesThisRound=0;
-  handInProgress=false;
   tournamentStarted=true;
+  handInProgress=false;
 }
 
 function cleanupElims(){
   for(const p of players){
-    if(!p) continue;
     if(!p.out && p.chips<=0){
       p.out=true;
       p.chips=0;
@@ -549,132 +445,94 @@ function cleanupElims(){
 }
 
 function tournamentWinner(){
-  const alive = players.filter(p=>p && !p.out);
+  const alive=players.filter(p=>!p.out);
   return alive.length===1 ? alive[0] : null;
 }
 
 function postBlind(i, amount){
   const p=players[i];
-  if(!p || p.out) return;
-  const pay=Math.min(amount, p.chips);
+  const pay=Math.min(amount,p.chips);
   p.chips-=pay; p.bet+=pay; pot+=pay;
 }
 
-/* -------------------- Hand flow -------------------- */
-function hardResetRoundForNewStreet(){
-  for(const p of players){
-    if(!p || p.out) continue;
-    p.bet = 0;
-    p.acted = false;
-  }
-  toCall = 0;
-  raisesThisRound = 0;
-}
-
 function startHandAuto(){
-  // Called only when RUNNING (not paused/menu)
   if(menuOpen || paused) return;
-  ensureTournament();
 
+  ensureTournament();
   cleanupElims();
 
-  const w = tournamentWinner();
+  const w=tournamentWinner();
   if(w){
-    elMsg.textContent = `🏆 CHAMPION: ${w.name}! (новый турнир через 2 сек)`;
-    handInProgress=false;
-    stage="IDLE";
+    elMsg.textContent=`🏆 CHAMPION: ${w.name}! (новый турнир через 2 сек)`;
     render(); save();
-
     stopAllTimers();
-    streetPauseId = scheduleTimeout(()=>{
+    streetPauseId=scheduleTimeout(()=>{
       if(menuOpen || paused) return;
-      // New tournament
       players.forEach(p=>{
         p.out=false; p.folded=false; p.bet=0; p.hand=[]; p.acted=false;
         p.chips=START_CHIPS;
       });
-      dealer=0; sb=1; bb=2;
-      pot=0; board=[]; toCall=0; raisesThisRound=0;
-      stage="IDLE"; handInProgress=false;
+      dealer=0; stage="IDLE"; pot=0; board=[]; toCall=0; raisesThisRound=0;
+      handInProgress=false;
       render(); save();
-      // start again
       startHandAuto();
-    }, 2000);
-
+    },2000);
     return;
   }
 
-  // fresh hand
   handInProgress=true;
-  stage="PREFLOP";
   deck=newDeck();
   board=[];
   pot=0;
 
   for(const p of players){
-    if(!p) continue;
-    p.folded=false;
-    p.bet=0;
-    p.hand=[];
-    p.acted=false;
+    p.folded=false; p.bet=0; p.hand=[]; p.acted=false;
   }
 
-  dealer = nextNotOutIndex(dealer);
-  sb = nextNotOutIndex(dealer);
-  bb = nextNotOutIndex(sb);
+  dealer=nextNotOutIndex(dealer);
+  sb=nextNotOutIndex(dealer);
+  bb=nextNotOutIndex(sb);
 
-  // deal 2 cards each (skip out players)
   for(let r=0;r<2;r++){
-    for(const p of players){
-      if(p && !p.out) p.hand.push(deck.pop());
-    }
+    for(const p of players) if(!p.out) p.hand.push(deck.pop());
   }
 
-  // blinds
-  hardResetRoundForNewStreet();
-  postBlind(sb, SMALL_BLIND);
-  postBlind(bb, BIG_BLIND);
-  toCall = Math.max(players[sb]?.bet||0, players[bb]?.bet||0);
+  for(const p of players) p.bet=0;
+  toCall=0; raisesThisRound=0;
+  resetActedFlags();
 
-  // who acts first preflop: after BB
-  current = nextActiveIndex(bb);
+  postBlind(sb,SMALL_BLIND);
+  postBlind(bb,BIG_BLIND);
+  toCall=Math.max(players[sb].bet, players[bb].bet);
 
-  // reset hero info
-  heroComboText="";
-  heroWinPct=null;
-  heroHighlightKeys.clear();
+  stage="PREFLOP";
+  current=nextActiveIndex(bb);
 
+  heroComboText=""; heroWinPct=null; heroHighlightKeys.clear();
   elMsg.textContent="Новая раздача…";
-  render();
-  save();
-  tick();
+  save(); render(); tick();
 }
 
 function pauseThen(fn, text){
   stopAllTimers();
-  elMsg.textContent = text;
+  elMsg.textContent=text;
   renderHUD();
-
-  streetPauseId = scheduleTimeout(()=>{
+  streetPauseId=scheduleTimeout(()=>{
     if(menuOpen || paused) return;
     fn();
   }, STREET_PAUSE_MS);
 }
 
 function advanceStage(){
-  if(!handInProgress) return;
-
-  const nextLabel =
+  const label =
     stage==="PREFLOP" ? "Флоп…" :
     stage==="FLOP"   ? "Тёрн…" :
-    stage==="TURN"   ? "Ривер…" :
-    stage==="RIVER"  ? "Шоудаун…" : "";
+    stage==="TURN"   ? "Ривер…" : "Шоудаун…";
 
   pauseThen(()=>{
-    // if ended by folds during pause:
-    if(!handInProgress) return;
-
-    hardResetRoundForNewStreet();
+    for(const p of players) p.bet=0;
+    toCall=0; raisesThisRound=0;
+    resetActedFlags();
 
     if(stage==="PREFLOP"){
       board.push(deck.pop(), deck.pop(), deck.pop());
@@ -689,85 +547,66 @@ function advanceStage(){
       stage="SHOWDOWN";
     }
 
-    // first to act postflop: left of dealer (i.e. next active after dealer)
-    current = nextActiveIndex(dealer);
-
-    render(); save();
+    current=nextActiveIndex(dealer);
+    save(); render();
 
     if(stage==="SHOWDOWN"){
-      pauseThen(doShowdown, "Шоудаун…");
+      pauseThen(doShowdown,"Шоудаун…");
       return;
     }
     tick();
-  }, nextLabel);
+  }, label);
 }
 
 function doShowdown(){
-  if(!handInProgress) return;
-
-  const contenders = inHandPlayers();
+  const contenders=inHandPlayers();
   if(contenders.length===1){
-    awardPot(players.indexOf(contenders[0]), "(all folded)");
+    awardPot(players.indexOf(contenders[0]),"(all folded)");
     return;
   }
 
-  const evals = contenders.map(p=>{
+  const evals=contenders.map(p=>{
     const {ev}=bestOf7(p.hand.concat(board));
-    return {p, ev};
+    return {p,ev};
   }).sort((a,b)=>compareEval(a.ev,b.ev));
 
-  const best = evals[evals.length-1].ev;
-  const winners = evals.filter(x=>compareEval(x.ev, best)===0).map(x=>x.p);
+  const best=evals[evals.length-1].ev;
+  const winners=evals.filter(x=>compareEval(x.ev,best)===0).map(x=>x.p);
 
-  const share = Math.floor(pot / winners.length);
-  let rem = pot - share*winners.length;
+  const share=Math.floor(pot/winners.length);
+  let rem=pot-share*winners.length;
   for(const w of winners){
-    w.chips += share;
-    if(rem>0){ w.chips += 1; rem--; }
+    w.chips+=share;
+    if(rem>0){ w.chips+=1; rem--; }
   }
-
-  elMsg.textContent = `Победитель: ${winners.map(w=>w.name).join(", ")}`;
+  elMsg.textContent=`Победитель: ${winners.map(w=>w.name).join(", ")}`;
   pot=0;
 
   handInProgress=false;
   stage="IDLE";
   cleanupElims();
-
-  render(); save();
+  save(); render();
 
   stopAllTimers();
-  streetPauseId = scheduleTimeout(()=>{
-    if(menuOpen || paused) return;
-    startHandAuto();
-  }, 1200);
+  streetPauseId=scheduleTimeout(()=>{ if(!menuOpen && !paused) startHandAuto(); },1200);
 }
 
 function awardPot(idx, reason){
-  const p = players[idx];
-  if(p) p.chips += pot;
-
-  elMsg.textContent = `${p?.name||"Player"} wins ${pot} ${reason||""}`.trim();
+  players[idx].chips+=pot;
+  elMsg.textContent=`${players[idx].name} wins ${pot} ${reason||""}`.trim();
   pot=0;
-
   handInProgress=false;
   stage="IDLE";
   cleanupElims();
-
-  render(); save();
-
+  save(); render();
   stopAllTimers();
-  streetPauseId = scheduleTimeout(()=>{
-    if(menuOpen || paused) return;
-    startHandAuto();
-  }, 1200);
+  streetPauseId=scheduleTimeout(()=>{ if(!menuOpen && !paused) startHandAuto(); },1200);
 }
 
-/* -------------------- Player actions -------------------- */
+/* ---------- Actions ---------- */
 function playerFold(i, byTimeout=false){
   stopAllTimers();
   const p=players[i];
-  if(!handInProgress || !p || p.out || p.folded) { tick(); return; }
-
   p.folded=true;
   p.acted=true;
 
@@ -775,11 +614,10 @@ function playerFold(i, byTimeout=false){
   render(); save();
 
   if(onlyOneLeftInHand()){
-    awardPot(players.indexOf(inHandPlayers()[0]), "(all folded)");
+    awardPot(players.indexOf(inHandPlayers()[0]),"(all folded)");
     return;
   }
-
-  current = nextActiveIndex(i);
+  current=nextActiveIndex(i);
   if(bettingRoundComplete()){ advanceStage(); return; }
   tick();
 }
@@ -787,15 +625,12 @@ function playerFold(i, byTimeout=false){
 function playerCheck(i, byTimeout=false){
   stopAllTimers();
   const p=players[i];
-  if(!handInProgress || !p || p.out || p.folded) { tick(); return; }
-
-  const need = Math.max(0, toCall - p.bet);
-  if(need!==0){ tick(); return; }
-
+  const need=Math.max(0,toCall-p.bet);
+  if(need!==0) return;
   p.acted=true;
 
   elMsg.textContent = byTimeout ? `${p.name} auto-check (timeout)` : `${p.name} checks`;
-  current = nextActiveIndex(i);
+  current=nextActiveIndex(i);
 
   render(); save();
   if(bettingRoundComplete()){ advanceStage(); return; }
@@ -805,19 +640,13 @@ function playerCheck(i, byTimeout=false){
 function playerCall(i){
   stopAllTimers();
   const p=players[i];
-  if(!handInProgress || !p || p.out || p.folded) { tick(); return; }
+  const need=Math.max(0,toCall-p.bet);
+  const pay=Math.min(need,p.chips);
+  p.chips-=pay; p.bet+=pay; pot+=pay;
+  p.acted=true;
 
-  const need = Math.max(0, toCall - p.bet);
-  const pay = Math.min(need, p.chips);
-
-  p.chips -= pay;
-  p.bet   += pay;
-  pot     += pay;
-
-  p.acted = true;
-
-  elMsg.textContent = `${p.name} calls ${pay}`;
-  current = nextActiveIndex(i);
+  elMsg.textContent=`${p.name} calls ${pay}`;
+  current=nextActiveIndex(i);
 
   render(); save();
   if(bettingRoundComplete()){ advanceStage(); return; }
@@ -826,43 +655,33 @@ function playerCall(i){
 
 function playerRaiseTo(i, raiseTo){
   stopAllTimers();
+  if(raisesThisRound>=MAX_RAISES_PER_ROUND){ playerCall(i); return; }
+
   const p=players[i];
-  if(!handInProgress || !p || p.out || p.folded) { tick(); return; }
+  raiseTo=Math.max(raiseTo, minRaiseTo());
+  raiseTo=Math.min(raiseTo, p.bet+p.chips);
 
-  if(raisesThisRound >= MAX_RAISES_PER_ROUND){
-    playerCall(i);
-    return;
-  }
-
-  const min = minRaiseTo();
-  const max = p.bet + p.chips;
-
-  raiseTo = clamp(Math.max(raiseTo, min), 0, max);
-
-  const add = Math.max(0, raiseTo - p.bet);
-  const pay = Math.min(add, p.chips);
+  const add=Math.max(0, raiseTo-p.bet);
+  const pay=Math.min(add, p.chips);
   if(pay<=0){ playerCall(i); return; }
 
-  p.chips -= pay;
-  p.bet   += pay;
-  pot     += pay;
-
-  toCall = Math.max(toCall, p.bet);
+  p.chips-=pay; p.bet+=pay; pot+=pay;
+  toCall=Math.max(toCall, p.bet);
   raisesThisRound++;
 
   resetOthersActedAfterRaise(i);
 
-  elMsg.textContent = `${p.name} raises to ${p.bet}`;
-  current = nextActiveIndex(i);
+  elMsg.textContent=`${p.name} raises to ${p.bet}`;
+  current=nextActiveIndex(i);
 
   render(); save();
   tick();
 }
 
-/* -------------------- Bots -------------------- */
+/* ---------- Bots ---------- */
 function botDecision(i){
   const p=players[i];
-  const need=Math.max(0,toCall - p.bet);
+  const need=Math.max(0,toCall-p.bet);
   const stack=Math.max(1,p.chips);
   const pressure=need/(stack+1);
 
@@ -898,13 +717,9 @@ function botDecision(i){
 function botAct(){
   if(!handInProgress || menuOpen || paused) return;
 
-  // skip invalid / folded
-  if(players[current]?.out || players[current]?.folded){
-    current = nextActiveIndex(current);
-  }
-
+  if(players[current].out || players[current].folded) current=nextActiveIndex(current);
   if(onlyOneLeftInHand()){
-    awardPot(players.indexOf(inHandPlayers()[0]), "(all folded)");
+    awardPot(players.indexOf(inHandPlayers()[0]),"(all folded)");
     return;
   }
 
@@ -929,31 +744,37 @@ function botAct(){
   }
 }
 
-/* -------------------- HERO info -------------------- */
+/* ---------- HERO info ---------- */
 function updateHeroInfo(){
   heroComboText="";
   heroWinPct=null;
   heroHighlightKeys.clear();
 
   const hero=players[0];
-  if(!handInProgress || !hero || hero.out || hero.folded || !hero.hand || hero.hand.length<2) return;
+  if(!handInProgress || !hero || hero.out || hero.folded) return;
 
   const cards7=hero.hand.concat(board);
-  const {ev,best5}=bestOf7(cards7);
-  heroComboText=catName(ev.cat);
-  for(const c of best5) heroHighlightKeys.add(cardKey(c));
+
+  // до флопа не вычисляем best5, чтобы не подсвечивать ерунду
+  if(cards7.length >= 5){
+    const {ev,best5}=bestOf7(cards7);
+    heroComboText=catName(ev.cat);
+    for(const c of best5) heroHighlightKeys.add(cardKey(c));
+  } else {
+    heroComboText="";
+  }
 
   heroWinPct=monteCarloWinPct();
 }
 
-/* -------------------- Render -------------------- */
+/* ---------- Render ---------- */
 function renderHUD(){
-  elNick.textContent = nick ?? "-";
-  elStage.textContent = stage + (paused ? " (PAUSED)" : "");
-  elPot.textContent = String(pot);
-  elTurnName.textContent = players[current]?.name ?? "-";
-  elStack.textContent = String(players[0]?.chips ?? 0);
-  elTurnTimer.textContent = String(turnLeft);
+  elNick.textContent=nick ?? "-";
+  elStage.textContent=stage + (paused ? " (PAUSED)" : "");
+  elPot.textContent=String(pot);
+  elTurnName.textContent=players[current]?.name ?? "-";
+  elStack.textContent=String(players[0]?.chips ?? 0);
+  elTurnTimer.textContent=String(turnLeft);
 }
 
 function makeCardEl(text, hidden){
@@ -971,7 +792,6 @@ function makeCardEl(text, hidden){
 function render(){
   updateHeroInfo();
 
-  // board
   elBoard.innerHTML="";
   for(let i=0;i<5;i++){
     const c=board[i];
@@ -980,7 +800,6 @@ function render(){
     elBoard.appendChild(el);
   }
 
-  // seats
   elSeats.innerHTML="";
   const pos=["pos-0","pos-1","pos-2","pos-3","pos-4","pos-5"];
   for(let i=0;i<players.length;i++){
@@ -993,29 +812,28 @@ function render(){
 
     const nm=document.createElement("div");
     nm.className="name";
-    nm.textContent=p?.name ?? `P${i}`;
+    nm.textContent=p.name;
 
     const tag=document.createElement("div");
     tag.className="tag";
-
-    if(p?.out){ tag.classList.add("out"); tag.textContent="OUT"; }
-    else if(handInProgress && i===current && !p?.folded && !paused){ tag.classList.add("turn"); tag.textContent="TURN"; }
-    else tag.textContent = p?.isBot ? "BOT" : "YOU";
+    if(p.out){ tag.classList.add("out"); tag.textContent="OUT"; }
+    else if(handInProgress && i===current && !p.folded && !paused){ tag.classList.add("turn"); tag.textContent="TURN"; }
+    else tag.textContent=p.isBot?"BOT":"YOU";
 
     top.appendChild(nm);
     top.appendChild(tag);
 
     const meta=document.createElement("div");
     meta.className="meta";
-    meta.innerHTML=`<span>chips: <b>${p?.chips ?? 0}</b></span><span>${p?.folded ? "<span style='color:var(--danger)'>folded</span>" : ""}</span>`;
+    meta.innerHTML=`<span>chips: <b>${p.chips}</b></span><span>${p.folded ? "<span style='color:var(--danger)'>folded</span>" : ""}</span>`;
 
     const cards=document.createElement("div");
-    cards.className="cards" + ((i===0 && p?.folded) ? " folded" : "");
+    cards.className="cards" + ((i===0 && p.folded) ? " folded" : "");
 
-    const hidden = p?.isBot && handInProgress && stage!=="SHOWDOWN";
-    const show   = !p?.isBot || stage==="SHOWDOWN" || !handInProgress;
+    const hidden = p.isBot && handInProgress && stage!=="SHOWDOWN";
+    const show   = !p.isBot || stage==="SHOWDOWN" || !handInProgress;
 
-    const c1=p?.hand?.[0], c2=p?.hand?.[1];
+    const c1=p.hand?.[0], c2=p.hand?.[1];
     const el1=makeCardEl(c1 && show ? (c1.r+c1.s) : "", hidden || !show);
     const el2=makeCardEl(c2 && show ? (c2.r+c2.s) : "", hidden || !show);
 
@@ -1025,14 +843,14 @@ function render(){
     cards.appendChild(el1);
     cards.appendChild(el2);
 
-    const betEl=document.createElement("div");
-    betEl.className="bet";
-    betEl.textContent = p?.out ? "" : ((p?.bet||0)>0 ? `Bet: ${p.bet}` : "");
+    const bet=document.createElement("div");
+    bet.className="bet";
+    bet.textContent = p.out ? "" : (p.bet>0 ? `Bet: ${p.bet}` : "");
 
     seat.appendChild(top);
     seat.appendChild(meta);
     seat.appendChild(cards);
-    seat.appendChild(betEl);
+    seat.appendChild(bet);
 
     if(i===0){
       const info=document.createElement("div");
@@ -1057,25 +875,21 @@ function updateButtons(){
   btnFold.disabled = !yourTurn;
   btnRaise.disabled = !yourTurn || raisesThisRound>=MAX_RAISES_PER_ROUND;
 
-  const need = (you && handInProgress) ? Math.max(0, toCall - (you.bet||0)) : 0;
+  const need = (you && handInProgress) ? Math.max(0,toCall-you.bet) : 0;
   btnCheck.disabled = !(yourTurn && need===0);
   btnCall.disabled  = !(yourTurn && need>0);
 }
 
-/* -------------------- Raise modal -------------------- */
+/* ---------- Raise modal ---------- */
 function openRaiseModal(){
   const you=players[0];
-  if(!you) return;
-
-  const min=clamp(minRaiseTo(), 0, you.bet+you.chips);
+  const min=clamp(minRaiseTo(),0,you.bet+you.chips);
   const max=you.bet+you.chips;
 
   raiseSlider.min=String(min);
   raiseSlider.max=String(max);
   raiseSlider.value=String(min);
-
   raiseToLabel.textContent=String(min);
-
   raiseInput.value=String(min);
   raiseInput.min=String(min);
   raiseInput.max=String(max);
@@ -1090,7 +904,6 @@ function syncRaiseFromSlider(){
 }
 function syncRaiseFromInput(){
   const you=players[0];
-  if(!you) return;
   const min=clamp(minRaiseTo(),0,you.bet+you.chips);
   const max=you.bet+you.chips;
   let v=Number(raiseInput.value||min);
@@ -1100,9 +913,9 @@ function syncRaiseFromInput(){
   raiseToLabel.textContent=String(v);
 }
 
-/* -------------------- Menu -------------------- */
+/* ---------- Menu controls ---------- */
 function buildMenuControls(){
-  const modal = menuOverlay?.querySelector(".modal");
+  const modal = menuOverlay.querySelector(".modal");
   if(!modal) return;
 
   const old = modal.querySelector(".menu-controls");
@@ -1114,7 +927,6 @@ function buildMenuControls(){
   const row1=document.createElement("div");
   row1.className="menu-row";
   row1.innerHTML = `<div class="label">Status: <b>${paused ? "PAUSED" : "RUNNING"}</b></div>`;
-
   const btns=document.createElement("div");
   btns.style.display="flex";
   btns.style.gap="10px";
@@ -1124,8 +936,11 @@ function buildMenuControls(){
   pauseBtn.className="btn";
   pauseBtn.textContent="Pause";
   pauseBtn.onclick=()=>{
-    pauseGame();
+    paused=true;
+    stopAllTimers();
+    save();
     buildMenuControls();
+    render();
   };
 
   const resumeBtn=document.createElement("button");
@@ -1138,19 +953,17 @@ function buildMenuControls(){
   newBtn.textContent="New Tournament";
   newBtn.onclick=()=>{
     if(!confirm("Сбросить турнир и начать заново?")) return;
-    stopAllTimers();
     ensureTournament();
     players.forEach(p=>{
       p.out=false; p.folded=false; p.bet=0; p.hand=[]; p.acted=false;
       p.chips=START_CHIPS;
     });
-    dealer=0; sb=1; bb=2;
-    stage="IDLE"; pot=0; board=[]; toCall=0; raisesThisRound=0;
+    dealer=0; stage="IDLE"; pot=0; board=[]; toCall=0; raisesThisRound=0;
     handInProgress=false;
-
     paused=true;
-    render();
+    stopAllTimers();
     save();
+    render();
     buildMenuControls();
   };
 
@@ -1161,11 +974,9 @@ function buildMenuControls(){
 
   const row2=document.createElement("div");
   row2.className="menu-row";
-
   const lab=document.createElement("div");
   lab.className="label";
   lab.textContent="Turn time:";
-
   const sel=document.createElement("select");
   for(const v of TURN_SECONDS_OPTIONS){
     const opt=document.createElement("option");
@@ -1178,7 +989,6 @@ function buildMenuControls(){
     turnSeconds=Number(sel.value);
     save();
   };
-
   row2.appendChild(lab);
   row2.appendChild(sel);
 
@@ -1187,6 +997,7 @@ function buildMenuControls(){
   modal.appendChild(wrap);
 }
 
+/* ---------- Menu open/close ---------- */
 function openMenu(){
   menuOpen=true;
   stopAllTimers();
@@ -1195,24 +1006,14 @@ function openMenu(){
   renderHUD();
   updateButtons();
 }
-
 function closeMenu(){
   show(menuOverlay,false);
   menuOpen=false;
-  // If running - continue tick
-  if(!paused) tick();
-  else updateButtons();
+  tick();
 }
 
-function pauseGame(){
-  paused=true;
-  stopAllTimers();
-  render();
-  save();
-}
-
+/* ✅ FIX: Resume always works + всегда раздаёт если IDLE */
 function resumeGame(){
-  // absolute guarantee: on Resume we always have valid tournament, we close menu, unpause, then either deal or tick.
   stopAllTimers();
   ensureTournament();
 
@@ -1220,22 +1021,18 @@ function resumeGame(){
   menuOpen=false;
   show(menuOverlay,false);
 
-  // If no hand or IDLE => deal immediately
   if(!handInProgress || stage==="IDLE"){
     startHandAuto();
     save();
     return;
   }
-
   tick();
   save();
 }
 
-/* -------------------- Tick (main loop) -------------------- */
+/* ---------- Tick ---------- */
 function tick(){
-  stopAllTimers(); // clears pending stuff & bumps token (prevents race)
-  // BUT: stopAllTimers also bumps token; if we want to keep token stable for new timers,
-  // it's fine because we schedule new ones after this.
+  stopAllTimers();
 
   if(menuOpen || paused){
     updateButtons();
@@ -1244,72 +1041,59 @@ function tick(){
 
   ensureTournament();
 
-  // Auto-start hand if running but idle
   if(!handInProgress || stage==="IDLE"){
     startHandAuto();
     return;
   }
 
-  // If showdown stage reached, we should already be in doShowdown scheduling; don't act here.
   if(stage==="SHOWDOWN"){
     updateButtons();
     return;
   }
 
-  // skip invalid current
-  if(players[current]?.out || players[current]?.folded){
-    current = nextActiveIndex(current);
+  if(players[current].out || players[current].folded){
+    current=nextActiveIndex(current);
   }
 
   renderHUD();
   updateButtons();
 
-  const actor = players[current];
-  if(!actor){
-    // emergency reset
-    stage="IDLE";
-    handInProgress=false;
-    render(); save();
-    startHandAuto();
-    return;
-  }
-
-  if(!actor.isBot){
+  if(!players[current].isBot){
     elMsg.textContent="Твой ход.";
     startTurnTimer();
     return;
   }
 
   elMsg.textContent="Бот думает…";
-  botTimerId = scheduleTimeout(()=>botAct(), BOT_THINK_MS);
+  botTimerId=scheduleTimeout(()=>botAct(), BOT_THINK_MS);
 }
 
-/* -------------------- Events -------------------- */
-btnMenu?.addEventListener("click", openMenu);
-btnCloseMenu?.addEventListener("click", closeMenu);
+/* ---------- Events ---------- */
+btnMenu.addEventListener("click", openMenu);
+btnCloseMenu.addEventListener("click", closeMenu);
 
-btnFold?.addEventListener("click", ()=>{ if(current===0 && !paused && !menuOpen) playerFold(0); });
-btnCheck?.addEventListener("click", ()=>{ if(current===0 && !paused && !menuOpen) playerCheck(0); });
-btnCall?.addEventListener("click", ()=>{ if(current===0 && !paused && !menuOpen) playerCall(0); });
-btnRaise?.addEventListener("click", ()=>{ if(current===0 && !paused && !menuOpen) openRaiseModal(); });
+btnFold.addEventListener("click", ()=>{ if(current===0 && !paused && !menuOpen) playerFold(0); });
+btnCheck.addEventListener("click", ()=>{ if(current===0 && !paused && !menuOpen) playerCheck(0); });
+btnCall.addEventListener("click", ()=>{ if(current===0 && !paused && !menuOpen) playerCall(0); });
+btnRaise.addEventListener("click", ()=>{ if(current===0 && !paused && !menuOpen) openRaiseModal(); });
 
-raiseSlider?.addEventListener("input", syncRaiseFromSlider);
-raiseInput?.addEventListener("input", syncRaiseFromInput);
-btnRaiseClose?.addEventListener("click", closeRaiseModal);
-btnRaiseConfirm?.addEventListener("click", ()=>{
+raiseSlider.addEventListener("input", syncRaiseFromSlider);
+raiseInput.addEventListener("input", syncRaiseFromInput);
+btnRaiseClose.addEventListener("click", closeRaiseModal);
+btnRaiseConfirm.addEventListener("click", ()=>{
   const v=Number(raiseSlider.value);
   closeRaiseModal();
-  if(current===0 && !paused && !menuOpen) playerRaiseTo(0, v);
+  if(current===0 && !paused && !menuOpen) playerRaiseTo(0,v);
 });
-btnRaiseMin?.addEventListener("click", ()=>{ raiseSlider.value=raiseSlider.min; syncRaiseFromSlider(); });
-btnRaiseAll?.addEventListener("click", ()=>{ raiseSlider.value=raiseSlider.max; syncRaiseFromSlider(); });
-btnRaiseHalf?.addEventListener("click", ()=>{
+btnRaiseMin.addEventListener("click", ()=>{ raiseSlider.value=raiseSlider.min; syncRaiseFromSlider(); });
+btnRaiseAll.addEventListener("click", ()=>{ raiseSlider.value=raiseSlider.max; syncRaiseFromSlider(); });
+btnRaiseHalf.addEventListener("click", ()=>{
   const min=Number(raiseSlider.min), max=Number(raiseSlider.max);
   raiseSlider.value=String(((min+max)/2)|0);
   syncRaiseFromSlider();
 });
 
-/* -------------------- Nick flow -------------------- */
+/* ---------- Nick ---------- */
 function openNick(){
   show(nickOverlay,true);
   const last=localStorage.getItem("poker_last_nick");
@@ -1317,60 +1101,52 @@ function openNick(){
   setTimeout(()=>nickInput.focus(), 30);
 }
 
-nickOk?.addEventListener("click", ()=>{
-  const n = nickInput.value.trim();
+nickOk.addEventListener("click", ()=>{
+  const n=nickInput.value.trim();
   if(!n){ nickInput.focus(); return; }
 
-  nick = n;
-  saveKey = keyForNick(nick);
+  nick=n;
+  saveKey=keyForNick(nick);
 
-  const stRaw = load(nick);
-  const st = sanitizeLoadedState(stRaw);
-
+  const st=load(nick);
   if(st){
-    turnSeconds = Number(st.turnSeconds ?? TURN_SECONDS_DEFAULT);
-    paused = !!st.paused;
+    turnSeconds=Number(st.turnSeconds ?? TURN_SECONDS_DEFAULT);
+    paused=!!st.paused;
+    const t=st.tournament;
+    if(t && t.players){
+      players=t.players;
+      deck=t.deck ?? [];
+      board=t.board ?? [];
+      pot=t.pot ?? 0;
+      stage=t.stage ?? "IDLE";
+      dealer=t.dealer ?? 0; sb=t.sb ?? 1; bb=t.bb ?? 2;
+      current=t.current ?? 0;
+      toCall=t.toCall ?? 0;
+      raisesThisRound=t.raisesThisRound ?? 0;
+      handInProgress=!!t.handInProgress;
+      tournamentStarted=!!t.tournamentStarted;
 
-    const t = st.tournament;
-
-    players = safeClone(t.players);
-    deck    = safeClone(t.deck ?? []);
-    board   = safeClone(t.board ?? []);
-    pot     = Number(t.pot ?? 0);
-    stage   = String(t.stage ?? "IDLE");
-    dealer  = Number(t.dealer ?? 0);
-    sb      = Number(t.sb ?? 1);
-    bb      = Number(t.bb ?? 2);
-    current = Number(t.current ?? 0);
-    toCall  = Number(t.toCall ?? 0);
-    raisesThisRound = Number(t.raisesThisRound ?? 0);
-    handInProgress = !!t.handInProgress;
-    tournamentStarted = !!t.tournamentStarted;
-
-    // force hero naming
-    if(players[0]){ players[0].isBot=false; players[0].name=nick; }
-    for(const p of players) if(p) p.acted = !!p.acted;
-
-    // if loaded weirdness -> fix
-    ensureTournament();
+      if(players[0] && !players[0].isBot) players[0].name=nick;
+      for(const p of players) if(typeof p.acted!=="boolean") p.acted=false;
+    } else {
+      ensureTournament();
+    }
   } else {
     ensureTournament();
-    paused = true;
   }
 
   show(nickOverlay,false);
   render();
 
-  // open menu first: user clicks Resume
+  // Always open menu first; user hits Resume
   openMenu();
   save();
 });
+nickInput.addEventListener("keydown", (e)=>{ if(e.key==="Enter") nickOk.click(); });
 
-nickInput?.addEventListener("keydown", (e)=>{ if(e.key==="Enter") nickOk.click(); });
-
-/* -------------------- Boot -------------------- */
+/* ---------- Boot ---------- */
 function boot(){
-  // minimal placeholders so UI has something before nick
+  openNick();
   players = [
     {name:"YOU",isBot:false,chips:0,bet:0,folded:false,out:false,acted:false,hand:[]},
     {name:"BOT1",isBot:true,chips:0,bet:0,folded:false,out:false,acted:false,hand:[]},
@@ -1380,12 +1156,5 @@ function boot(){
     {name:"BOT5",isBot:true,chips:0,bet:0,folded:false,out:false,acted:false,hand:[]},
   ];
   render();
-  openNick();
 }
 boot();
-
-/* -------------------- Critical: betting completion hooks --------------------
-   These were already correct in your version. Here is the missing link:
-   We must advance street when round complete after CALL/CHECK/FOLD. Already done above.
-   Additionally, after each action we do tick(); so loop continues.
-*/
