@@ -9,6 +9,7 @@
 <body>
   <div id="app" class="app">
     <div class="table" id="table">
+
       <div class="hud">
         <div class="pill">👤 <span id="nick">-</span></div>
         <div class="pill">💰 Stack: <b id="stack">0</b></div>
@@ -24,7 +25,6 @@
 
       <div class="seats" id="seats"></div>
 
-      <!-- Bottom-right action buttons (separate, not one “window”) -->
       <div class="actions">
         <button class="btn ghost" id="btnMenu">☰ Menu</button>
         <button class="btn danger" id="btnFold">Fold</button>
@@ -42,7 +42,7 @@
           <input id="nickInput" maxlength="20" placeholder="например: artrum255" />
           <button class="btn accent" id="nickOk">OK</button>
         </div>
-        <p class="hint">Новый ник получает 1000 фишек. Сохранение в браузере.</p>
+        <p class="hint">Сохранение в браузере. Ник нужен, чтобы запускать игру.</p>
       </div>
     </div>
 
@@ -51,9 +51,11 @@
       <div class="modal">
         <h2>Меню</h2>
         <p class="hint">
-          Сейчас включён режим “Турнир против ботов”.<br>
-          Следующий шаг: звуки/анимации/фишки/подсветки/настройки.
+          Турнир против ботов. Pause замораживает всё. Resume всегда раздаёт/продолжает.
         </p>
+
+        <div id="menuControls"></div>
+
         <div class="row right">
           <button class="btn" id="btnCloseMenu">Close</button>
         </div>
@@ -87,6 +89,7 @@
     </div>
   </div>
 
-  <script src="./game.js"></script>
+  <!-- cache bust: меняй v=... если нужно -->
+  <script src="./game.js?v=100"></script>
 </body>
 </html>
