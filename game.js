@@ -1,10 +1,12 @@
-/* Poker Tournament (Step 1, fixed menu + no forced autostart)
-   - fullscreen table
-   - auto hands (no Start/Next buttons)
-   - menu always clickable + pauses timer
-   - after nick: open menu first, start tournament only after menu close
-   - 15s turn timer: auto-check if possible else auto-fold
-   - separate buttons: fold/check/call/raise + raise modal
+/* Poker Tournament v3
+   Fixes + adds:
+   - Proper street reveal: flop(3) -> turn(1) -> river(1) -> showdown
+   - No "check reveals all cards" (actedThisRound + raise resets)
+   - Menu: Pause/Resume + Turn-time setting (5/10/15/20) + New tournament
+   - Win% (Monte Carlo) vs remaining opponents only; bots' cards unknown
+   - Highlight best 5 cards for HERO (neon)
+   - Show HERO hand name + win% under HERO cards
+   - New storage key version to avoid old broken saves
 */
 
 const START_CHIPS = 1000;
@@ -12,13 +14,19 @@ const SMALL_BLIND = 10;
 const BIG_BLIND = 20;
 const BOT_COUNT = 5;
 const MAX_RAISES_PER_ROUND = 4;
+
+const TURN_SECONDS_OPTIONS = [5,10,15,20];
 const TURN_SECONDS_DEFAULT = 15;
+
 const BOT_THINK_MS = 450;
-const STREET_PAUSE_MS = 900;
+const STREET_PAUSE_MS = 850;
+
+const MC_ITERS_PREFLOP = 350;
+const MC_ITERS_POSTFLOP = 250;
 
 const SUITS = ["♣","♦","♥","♠"];
 const RANKS = ["2","3","4","5","6","7","8","9","T","J","Q","K","A"];
-const RVAL = Object.fromEntries(RANKS.map((r,i)=>[r, i+2]));
+const RVAL  = Object.fromEntries(RANKS.map((r,i)=>[r, i+2]));
 
 let nick = null;
 let saveKey = null;
@@ -27,7 +35,7 @@ let players = [];
 let deck = [];
 let board = [];
 let pot = 0;
-let stage = "IDLE";
+let stage = "IDLE"; // IDLE, PREFLOP, FLOP, TURN, RIVER, SHOWDOWN
 let dealer = 0, sb = 1, bb = 2;
 let current = 0;
 let toCall = 0;
@@ -42,7 +50,12 @@ let botTimerId = null;
 let streetPauseId = null;
 
 let menuOpen = false;
+let paused = false;
 let pendingAutoStartAfterMenu = false;
+
+let heroComboText = "";
+let heroWinPct = null;
+let heroHighlightKeys = new Set(); // e.g. "Ah♠" keys of best5 cards
 
 const $ = (id)=>document.getElementById(id);
 
@@ -79,13 +92,68 @@ const btnRaiseMin = $("btnRaiseMin");
 const btnRaiseHalf = $("btnRaiseHalf");
 const btnRaiseAll = $("btnRaiseAll");
 
-/* ---------- Persistence ---------- */
-function keyForNick(n){ return `poker_step1_${n.toLowerCase()}`; }
+/* -------------------- CSS inject for neon highlight + hero info -------------------- */
+(function injectExtraCSS(){
+  const css = `
+  .card.neon{
+    box-shadow: 0 0 0 2px rgba(99,242,197,.65),
+                0 0 12px rgba(99,242,197,.55),
+                0 0 28px rgba(99,242,197,.35),
+                0 10px 22px rgba(0,0,0,.55) !important;
+    border-color: rgba(99,242,197,.6) !important;
+  }
+  .hero-info{
+    margin-top:8px;
+    padding:8px 10px;
+    border-radius:14px;
+    background: rgba(0,0,0,.22);
+    border:1px solid rgba(255,255,255,.14);
+    color: rgba(234,245,241,.92);
+    font-size: 13px;
+    display:flex;
+    justify-content:space-between;
+    gap:10px;
+    align-items:center;
+  }
+  .hero-info b{ color: #eaf5f1; }
+  .hero-info .pct{ color: rgba(99,242,197,.95); font-weight: 900; }
+  .menu-controls{
+    margin-top:12px;
+    display:grid;
+    gap:10px;
+  }
+  .menu-row{
+    display:flex;
+    gap:10px;
+    flex-wrap:wrap;
+    align-items:center;
+    justify-content:space-between;
+  }
+  .menu-row .label{ color: rgba(181,201,193,.95); font-size:13px; }
+  .menu-row select{
+    padding:10px 12px;
+    border-radius:16px;
+    border:1px solid rgba(255,255,255,.14);
+    background:#0a1416;
+    color:#eaf5f1;
+    font-weight:900;
+    outline:none;
+  }`;
+  const style = document.createElement("style");
+  style.textContent = css;
+  document.head.appendChild(style);
+})();
+
+/* -------------------- Persistence -------------------- */
+function keyForNick(n){ return `poker_step1_v3_${n.toLowerCase()}`; }
+
 function save(){
   if(!saveKey) return;
   const state = {
+    version: 3,
     nick,
     turnSeconds,
+    paused,
     tournament: {
       players, deck, board, pot, stage, dealer, sb, bb, current, toCall, raisesThisRound,
       handInProgress, tournamentStarted
@@ -94,17 +162,18 @@ function save(){
   localStorage.setItem(saveKey, JSON.stringify(state));
   localStorage.setItem("poker_last_nick", nick);
 }
+
 function load(n){
   const raw = localStorage.getItem(keyForNick(n));
   if(!raw) return null;
   try { return JSON.parse(raw); } catch { return null; }
 }
 
-/* ---------- Utils ---------- */
+/* -------------------- Helpers -------------------- */
 function show(el, yes){ el.style.display = yes ? "flex" : "none"; }
 function clamp(x,a,b){ return Math.max(a, Math.min(b, x)); }
+function cardKey(c){ return c ? (c.r + c.s) : ""; }
 
-/* ---------- Deck ---------- */
 function newDeck(){
   const d = [];
   for(const s of SUITS) for(const r of RANKS) d.push({r,s});
@@ -114,7 +183,10 @@ function newDeck(){
   }
   return d;
 }
-function inHandPlayers(){ return players.filter(p => !p.out && !p.folded); }
+
+function alivePlayers(){ return players.filter(p=>!p.out); }
+function inHandPlayers(){ return players.filter(p=>!p.out && !p.folded); }
+
 function nextActiveIndex(from){
   const n = players.length;
   for(let k=1;k<=n;k++){
@@ -133,9 +205,8 @@ function nextNotOutIndex(from){
 }
 function onlyOneLeftInHand(){ return inHandPlayers().length === 1; }
 
-/* ---------- Evaluator (simple 7-card) ---------- */
-function straightHigh(uniqueRanksDesc){
-  const set = new Set(uniqueRanksDesc);
+/* -------------------- 5-card evaluator + 7-card brute best5 -------------------- */
+function straightHighFromSet(set){
   if(set.has(14) && set.has(5) && set.has(4) && set.has(3) && set.has(2)) return 5;
   for(let hi=14;hi>=5;hi--){
     let ok=true;
@@ -144,69 +215,62 @@ function straightHigh(uniqueRanksDesc){
   }
   return 0;
 }
-function evaluate7(cards){
-  const ranks = cards.map(c=>RVAL[c.r]).sort((a,b)=>b-a);
-  const suitMap = new Map();
-  const countMap = new Map();
-  for(const c of cards){
-    suitMap.set(c.s, (suitMap.get(c.s)||0)+1);
-    const v = RVAL[c.r];
-    countMap.set(v, (countMap.get(v)||0)+1);
-  }
+
+function evaluate5(cards5){
+  // returns {cat, tiebreak} higher better (cat 0..8)
+  const ranks = cards5.map(c=>RVAL[c.r]).sort((a,b)=>b-a);
+  const suits = cards5.map(c=>c.s);
+
+  const isFlush = suits.every(s=>s===suits[0]);
+  const count = new Map();
+  for(const r of ranks) count.set(r, (count.get(r)||0)+1);
+
   const unique = [...new Set(ranks)].sort((a,b)=>b-a);
+  const set = new Set(unique);
+  const st = straightHighFromSet(set);
 
-  let flushSuit=null;
-  for(const [s,c] of suitMap.entries()){ if(c>=5){ flushSuit=s; break; } }
-  let flushRanks=null;
-  if(flushSuit){
-    flushRanks = cards.filter(c=>c.s===flushSuit).map(c=>RVAL[c.r]).sort((a,b)=>b-a);
-  }
-  if(flushRanks){
-    const uniqFlush=[...new Set(flushRanks)].sort((a,b)=>b-a);
-    const sf=straightHigh(uniqFlush);
-    if(sf) return {cat:8,tiebreak:[sf]};
-  }
-
-  const groups=[...countMap.entries()].map(([r,c])=>({r,c}))
+  // groups sorted by (count desc, rank desc)
+  const groups = [...count.entries()].map(([r,c])=>({r,c}))
     .sort((a,b)=>(b.c-a.c)||(b.r-a.r));
-  const fours=groups.filter(g=>g.c===4).map(g=>g.r);
-  const threes=groups.filter(g=>g.c===3).map(g=>g.r);
-  const pairs=groups.filter(g=>g.c===2).map(g=>g.r);
 
-  if(fours.length){
-    const quad=Math.max(...fours);
-    const kicker=unique.find(r=>r!==quad);
-    return {cat:7,tiebreak:[quad,kicker]};
+  if(isFlush && st){
+    return {cat:8, tiebreak:[st]};
   }
-  if(threes.length){
-    const trip=Math.max(...threes);
-    const remainingTrips=threes.filter(r=>r!==trip);
-    const bestPair=pairs.length?Math.max(...pairs):(remainingTrips.length?Math.max(...remainingTrips):0);
-    if(bestPair) return {cat:6,tiebreak:[trip,bestPair]};
+  if(groups[0].c===4){
+    const quad = groups[0].r;
+    const kicker = unique.find(x=>x!==quad);
+    return {cat:7, tiebreak:[quad,kicker]};
   }
-  if(flushRanks) return {cat:5,tiebreak:flushRanks.slice(0,5)};
-  const st=straightHigh(unique);
-  if(st) return {cat:4,tiebreak:[st]};
-  if(threes.length){
-    const trip=Math.max(...threes);
-    const kickers=unique.filter(r=>r!==trip).slice(0,2);
-    return {cat:3,tiebreak:[trip,...kickers]};
+  if(groups[0].c===3 && groups[1] && groups[1].c===2){
+    return {cat:6, tiebreak:[groups[0].r, groups[1].r]};
   }
-  if(pairs.length>=2){
-    const sp=[...pairs].sort((a,b)=>b-a);
-    const p1=sp[0], p2=sp[1];
-    const kicker=unique.find(r=>r!==p1 && r!==p2);
-    return {cat:2,tiebreak:[p1,p2,kicker]};
+  if(isFlush){
+    return {cat:5, tiebreak:ranks};
   }
-  if(pairs.length===1){
-    const p=pairs[0];
-    const kickers=unique.filter(r=>r!==p).slice(0,3);
-    return {cat:1,tiebreak:[p,...kickers]};
+  if(st){
+    return {cat:4, tiebreak:[st]};
   }
-  return {cat:0,tiebreak:unique.slice(0,5)};
+  if(groups[0].c===3){
+    const trip = groups[0].r;
+    const kickers = unique.filter(x=>x!==trip);
+    return {cat:3, tiebreak:[trip, ...kickers]};
+  }
+  if(groups[0].c===2 && groups[1] && groups[1].c===2){
+    const p1 = Math.max(groups[0].r, groups[1].r);
+    const p2 = Math.min(groups[0].r, groups[1].r);
+    const kicker = unique.find(x=>x!==p1 && x!==p2);
+    return {cat:2, tiebreak:[p1,p2,kicker]};
+  }
+  if(groups[0].c===2){
+    const p = groups[0].r;
+    const kickers = unique.filter(x=>x!==p);
+    return {cat:1, tiebreak:[p, ...kickers]};
+  }
+  return {cat:0, tiebreak:ranks};
 }
+
 function compareEval(a,b){
-  if(a.cat!==b.cat) return a.cat-b.cat;
+  if(a.cat !== b.cat) return a.cat - b.cat;
   for(let i=0;i<Math.max(a.tiebreak.length,b.tiebreak.length);i++){
     const x=a.tiebreak[i]||0, y=b.tiebreak[i]||0;
     if(x!==y) return x-y;
@@ -214,41 +278,174 @@ function compareEval(a,b){
   return 0;
 }
 
-/* ---------- Betting ---------- */
-function resetRoundBets(){
-  for(const p of players) p.bet=0;
-  toCall=0;
-  raisesThisRound=0;
+function bestOf7(cards7){
+  // brute force choose best 5 out of 7 -> also returns chosen cards
+  let best = null;
+  let best5 = null;
+  const n = cards7.length;
+  for(let a=0;a<n-4;a++){
+    for(let b=a+1;b<n-3;b++){
+      for(let c=b+1;c<n-2;c++){
+        for(let d=c+1;d<n-1;d++){
+          for(let e=d+1;e<n;e++){
+            const combo = [cards7[a],cards7[b],cards7[c],cards7[d],cards7[e]];
+            const ev = evaluate5(combo);
+            if(!best || compareEval(best, ev) < 0){
+              best = ev;
+              best5 = combo;
+            }
+          }
+        }
+      }
+    }
+  }
+  return {ev:best, best5};
 }
-function postBlind(i, amount){
-  const p=players[i];
-  const pay=Math.min(amount,p.chips);
-  p.chips-=pay;
-  p.bet+=pay;
-  pot+=pay;
+
+function catName(cat){
+  return ["High Card","Pair","Two Pair","Three of a Kind","Straight","Flush","Full House","Four of a Kind","Straight Flush"][cat] || "Unknown";
+}
+
+/* -------------------- Win% Monte Carlo vs remaining bots only -------------------- */
+function monteCarloWinPct(){
+  if(!handInProgress) return null;
+  const hero = players[0];
+  if(!hero || hero.out || hero.folded) return null;
+
+  const opps = players
+    .map((p,idx)=>({p,idx}))
+    .filter(x=>x.idx!==0 && !x.p.out && !x.p.folded);
+
+  if(opps.length===0) return 100;
+
+  const known = [];
+  for(const c of hero.hand) known.push(c);
+  for(const c of board) if(c) known.push(c);
+
+  // build remaining deck
+  const full = [];
+  for(const s of SUITS) for(const r of RANKS) full.push({r,s});
+  const used = new Set(known.map(cardKey));
+  const remaining = full.filter(c=>!used.has(cardKey(c)));
+
+  const iters = (board.length===0 ? MC_ITERS_PREFLOP : MC_ITERS_POSTFLOP);
+  let score = 0;
+
+  for(let t=0;t<iters;t++){
+    // shuffle by sampling without modifying original heavily
+    // pick needed board cards + opponents hole cards from remaining
+    const needBoard = 5 - board.length;
+    const needOppCards = opps.length * 2;
+    const needTotal = needBoard + needOppCards;
+
+    // Fisher–Yates on a copy of remaining indices only for first needTotal
+    const pool = remaining.slice();
+    for(let i=pool.length-1;i>0;i--){
+      const j = (Math.random() * (i+1)) | 0;
+      [pool[i], pool[j]] = [pool[j], pool[i]];
+    }
+    const pick = pool.slice(0, needTotal);
+
+    // build simulated board
+    const simBoard = board.slice();
+    for(let i=0;i<needBoard;i++) simBoard.push(pick[i]);
+
+    // deal opponents
+    let offset = needBoard;
+    const oppHands = [];
+    for(let k=0;k<opps.length;k++){
+      oppHands.push([pick[offset], pick[offset+1]]);
+      offset += 2;
+    }
+
+    // evaluate hero
+    const hero7 = hero.hand.concat(simBoard);
+    const heroBest = bestOf7(hero7).ev;
+
+    // evaluate opponents & find winners
+    let bestEv = heroBest;
+    let winners = 1; // hero included
+    let heroIsBest = true;
+
+    for(let k=0;k<opps.length;k++){
+      const opp7 = oppHands[k].concat(simBoard);
+      const oppEv = bestOf7(opp7).ev;
+      const cmp = compareEval(bestEv, oppEv);
+      if(cmp < 0){
+        bestEv = oppEv;
+        winners = 1;
+        heroIsBest = false;
+      } else if(cmp === 0){
+        // tie with current best
+        if(compareEval(heroBest, oppEv) === 0){
+          winners += 1;
+        } else {
+          // best is someone else; tie among non-hero doesn't matter
+        }
+      }
+    }
+
+    if(heroIsBest){
+      // if hero shares best, count fraction
+      // winners computed only when heroBest equals bestEv; but to be safe:
+      let tieCount = 1;
+      for(let k=0;k<opps.length;k++){
+        const opp7 = oppHands[k].concat(simBoard);
+        const oppEv = bestOf7(opp7).ev;
+        if(compareEval(heroBest, oppEv)===0) tieCount++;
+      }
+      score += 1 / tieCount;
+    } else {
+      score += 0;
+    }
+  }
+
+  return Math.round((score / iters) * 100);
+}
+
+/* -------------------- Betting round correctness -------------------- */
+function resetActedFlags(){
+  for(const p of players) p.acted = false;
+}
+function markActed(i){
+  players[i].acted = true;
+}
+function resetOthersActedAfterRaise(raiserIdx){
+  for(let i=0;i<players.length;i++){
+    if(players[i].out || players[i].folded) continue;
+    players[i].acted = (i===raiserIdx);
+  }
 }
 function bettingRoundComplete(){
   for(const p of inHandPlayers()){
-    if(p.chips===0) continue;
-    if(p.bet!==toCall) return false;
+    if(p.chips===0) continue; // all-in doesn't need to act further
+    if(!p.acted) return false;
+    if(p.bet !== toCall) return false;
   }
   return true;
 }
-function minRaiseTo(){ return toCall + BIG_BLIND; }
 
-/* ---------- Turn Timer ---------- */
+function minRaiseTo(){ return toCall + BIG_BLIND; }
+function resetRoundBets(){
+  for(const p of players) p.bet = 0;
+  toCall = 0;
+  raisesThisRound = 0;
+  resetActedFlags();
+}
+
+/* -------------------- Turn Timer -------------------- */
 function clearTurnTimer(){
   if(turnTimerId) clearInterval(turnTimerId);
-  turnTimerId=null;
+  turnTimerId = null;
 }
 function startTurnTimer(){
   clearTurnTimer();
   turnLeft = turnSeconds;
   elTurnTimer.textContent = String(turnLeft);
   turnTimerId = setInterval(()=>{
-    if(menuOpen) return; // menu pauses countdown visually
+    if(menuOpen || paused) return;
     turnLeft--;
-    elTurnTimer.textContent = String(Math.max(0,turnLeft));
+    elTurnTimer.textContent = String(Math.max(0, turnLeft));
     if(turnLeft<=0){
       clearTurnTimer();
       onTurnTimeout();
@@ -256,7 +453,7 @@ function startTurnTimer(){
   }, 1000);
 }
 function onTurnTimeout(){
-  if(!handInProgress) return;
+  if(!handInProgress || paused) return;
   if(players[current].isBot) return;
   const you = players[0];
   const need = Math.max(0, toCall - you.bet);
@@ -264,35 +461,46 @@ function onTurnTimeout(){
   else playerFold(0, true);
 }
 
-/* ---------- Tournament ---------- */
-function cleanupElims(){
-  for(const p of players){
-    if(!p.out && p.chips<=0){
-      p.out=true;
-      p.chips=0;
-    }
-  }
-}
-function tournamentWinner(){
-  const alive = players.filter(p=>!p.out);
-  return alive.length===1 ? alive[0] : null;
-}
-
+/* -------------------- Tournament setup & flow -------------------- */
 function ensureTournament(){
   if(tournamentStarted && players.length) return;
   players = [];
-  players.push({name:nick,isBot:false,chips:START_CHIPS,bet:0,folded:false,out:false,hand:[]});
+  players.push({name:nick, isBot:false, chips:START_CHIPS, bet:0, folded:false, out:false, acted:false, hand:[]});
   for(let i=1;i<=BOT_COUNT;i++){
-    players.push({name:`BOT${i}`,isBot:true,chips:START_CHIPS,bet:0,folded:false,out:false,hand:[]});
+    players.push({name:`BOT${i}`, isBot:true, chips:START_CHIPS, bet:0, folded:false, out:false, acted:false, hand:[]});
   }
   dealer=0; sb=1; bb=2;
   stage="IDLE"; board=[]; pot=0; toCall=0; raisesThisRound=0;
   tournamentStarted=true;
   handInProgress=false;
+  paused=true; // start paused until Resume
+}
+
+function cleanupElims(){
+  for(const p of players){
+    if(!p.out && p.chips<=0){
+      p.out = true;
+      p.chips = 0;
+      p.folded = true;
+    }
+  }
+}
+
+function tournamentWinner(){
+  const alive = players.filter(p=>!p.out);
+  return alive.length===1 ? alive[0] : null;
+}
+
+function postBlind(i, amount){
+  const p = players[i];
+  const pay = Math.min(amount, p.chips);
+  p.chips -= pay;
+  p.bet += pay;
+  pot += pay;
 }
 
 function startHandAuto(){
-  if(menuOpen) return; // don't start hands while in menu
+  if(menuOpen || paused) return;
 
   cleanupElims();
   const w = tournamentWinner();
@@ -302,7 +510,11 @@ function startHandAuto(){
     save();
     setTimeout(()=>{
       if(menuOpen) return;
-      players.forEach(p=>{ p.out=false; p.folded=false; p.bet=0; p.hand=[]; p.chips=START_CHIPS; });
+      // restart tournament stacks
+      players.forEach(p=>{
+        p.out=false; p.folded=false; p.bet=0; p.hand=[]; p.acted=false;
+        p.chips = START_CHIPS;
+      });
       dealer=0; stage="IDLE"; pot=0; board=[]; toCall=0; raisesThisRound=0;
       handInProgress=false;
       render();
@@ -311,31 +523,43 @@ function startHandAuto(){
     return;
   }
 
-  handInProgress=true;
-  deck=newDeck();
-  board=[];
-  pot=0;
+  handInProgress = true;
+  deck = newDeck();
+  board = [];
+  pot = 0;
+
   for(const p of players){
-    p.folded=false; p.bet=0; p.hand=[];
+    p.folded=false; p.bet=0; p.hand=[]; p.acted=false;
   }
 
   dealer = nextNotOutIndex(dealer);
   sb = nextNotOutIndex(dealer);
   bb = nextNotOutIndex(sb);
 
+  // deal 2 cards
   for(let r=0;r<2;r++){
-    for(const p of players) if(!p.out) p.hand.push(deck.pop());
+    for(const p of players){
+      if(!p.out) p.hand.push(deck.pop());
+    }
   }
 
+  // blinds
   resetRoundBets();
   postBlind(sb, SMALL_BLIND);
   postBlind(bb, BIG_BLIND);
   toCall = Math.max(players[sb].bet, players[bb].bet);
 
-  stage="PREFLOP";
+  stage = "PREFLOP";
   current = nextActiveIndex(bb);
 
+  // acted flags: blinds haven't "acted" yet
+  resetActedFlags();
+
   elMsg.textContent = "Новая раздача…";
+  heroComboText = "";
+  heroWinPct = null;
+  heroHighlightKeys.clear();
+
   save();
   render();
   tick();
@@ -345,18 +569,37 @@ function pauseThen(fn, text){
   if(streetPauseId) clearTimeout(streetPauseId);
   elMsg.textContent = text;
   renderHUD();
-  streetPauseId = setTimeout(()=>{ if(!menuOpen) fn(); }, STREET_PAUSE_MS);
+  streetPauseId = setTimeout(()=>{
+    if(!menuOpen && !paused) fn();
+  }, STREET_PAUSE_MS);
 }
 
 function advanceStage(){
-  pauseThen(()=>{
-    for(const p of players) p.bet=0;
-    toCall=0; raisesThisRound=0;
+  // move to next street with pause
+  const label =
+    stage==="PREFLOP" ? "Флоп…" :
+    stage==="FLOP" ? "Тёрн…" :
+    stage==="TURN" ? "Ривер…" : "Шоудаун…";
 
-    if(stage==="PREFLOP"){ board.push(deck.pop(), deck.pop(), deck.pop()); stage="FLOP"; }
-    else if(stage==="FLOP"){ board.push(deck.pop()); stage="TURN"; }
-    else if(stage==="TURN"){ board.push(deck.pop()); stage="RIVER"; }
-    else if(stage==="RIVER"){ stage="SHOWDOWN"; }
+  pauseThen(()=>{
+    // reset bets for new street
+    for(const p of players) p.bet = 0;
+    toCall = 0;
+    raisesThisRound = 0;
+    resetActedFlags();
+
+    if(stage==="PREFLOP"){
+      board.push(deck.pop(), deck.pop(), deck.pop());
+      stage = "FLOP";
+    } else if(stage==="FLOP"){
+      board.push(deck.pop());
+      stage = "TURN";
+    } else if(stage==="TURN"){
+      board.push(deck.pop());
+      stage = "RIVER";
+    } else if(stage==="RIVER"){
+      stage = "SHOWDOWN";
+    }
 
     current = nextActiveIndex(dealer);
 
@@ -368,7 +611,7 @@ function advanceStage(){
       return;
     }
     tick();
-  }, stage==="PREFLOP"?"Флоп…":stage==="FLOP"?"Тёрн…":stage==="TURN"?"Ривер…":"Шоудаун…");
+  }, label);
 }
 
 function doShowdown(){
@@ -377,10 +620,14 @@ function doShowdown(){
     awardPot(players.indexOf(contenders[0]), "(all folded)");
     return;
   }
-  const evals = contenders.map(p=>({p, e:evaluate7([...p.hand, ...board])}))
-    .sort((a,b)=>compareEval(a.e,b.e));
-  const best = evals[evals.length-1].e;
-  const winners = evals.filter(x=>compareEval(x.e,best)===0).map(x=>x.p);
+
+  const evals = contenders.map(p=>{
+    const {ev} = bestOf7(p.hand.concat(board));
+    return {p, ev};
+  }).sort((a,b)=>compareEval(a.ev,b.ev));
+
+  const best = evals[evals.length-1].ev;
+  const winners = evals.filter(x=>compareEval(x.ev,best)===0).map(x=>x.p);
 
   const share = Math.floor(pot / winners.length);
   let rem = pot - share*winners.length;
@@ -388,8 +635,9 @@ function doShowdown(){
     w.chips += share;
     if(rem>0){ w.chips += 1; rem--; }
   }
+
   elMsg.textContent = `Победитель: ${winners.map(w=>w.name).join(", ")}`;
-  pot=0;
+  pot = 0;
 
   handInProgress=false;
   stage="IDLE";
@@ -398,25 +646,26 @@ function doShowdown(){
   save();
   render();
 
-  setTimeout(()=>{ if(!menuOpen) startHandAuto(); }, 1200);
+  setTimeout(()=>{ if(!menuOpen && !paused) startHandAuto(); }, 1200);
 }
 
 function awardPot(idx, reason){
   players[idx].chips += pot;
   elMsg.textContent = `${players[idx].name} wins ${pot} ${reason||""}`.trim();
-  pot=0;
+  pot = 0;
   handInProgress=false;
   stage="IDLE";
   cleanupElims();
   save();
   render();
-  setTimeout(()=>{ if(!menuOpen) startHandAuto(); }, 1200);
+  setTimeout(()=>{ if(!menuOpen && !paused) startHandAuto(); }, 1200);
 }
 
-/* ---------- Actions ---------- */
+/* -------------------- Actions -------------------- */
 function playerFold(i, byTimeout=false){
   clearTurnTimer();
-  players[i].folded=true;
+  players[i].folded = true;
+  players[i].acted = true;
   elMsg.textContent = byTimeout ? `${players[i].name} auto-fold (timeout)` : `${players[i].name} folds`;
   render();
   save();
@@ -426,65 +675,91 @@ function playerFold(i, byTimeout=false){
     return;
   }
   current = nextActiveIndex(i);
+  if(bettingRoundComplete()) { advanceStage(); return; }
   tick();
 }
+
 function playerCheck(i, byTimeout=false){
   clearTurnTimer();
-  const p=players[i];
-  const need=Math.max(0,toCall-p.bet);
-  if(need!==0) return;
+  const p = players[i];
+  const need = Math.max(0, toCall - p.bet);
+  if(need!==0) return; // not allowed
+  p.acted = true;
   elMsg.textContent = byTimeout ? `${p.name} auto-check (timeout)` : `${p.name} checks`;
   current = nextActiveIndex(i);
-  render();
+
   save();
+  render();
+
   if(bettingRoundComplete()) { advanceStage(); return; }
   tick();
 }
+
 function playerCall(i){
   clearTurnTimer();
-  const p=players[i];
-  const need=Math.max(0,toCall-p.bet);
-  const pay=Math.min(need,p.chips);
-  p.chips-=pay; p.bet+=pay; pot+=pay;
+  const p = players[i];
+  const need = Math.max(0, toCall - p.bet);
+  const pay = Math.min(need, p.chips);
+  p.chips -= pay;
+  p.bet += pay;
+  pot += pay;
+  p.acted = true;
+
   elMsg.textContent = `${p.name} calls ${pay}`;
   current = nextActiveIndex(i);
-  render();
+
   save();
+  render();
+
   if(bettingRoundComplete()) { advanceStage(); return; }
   tick();
 }
+
 function playerRaiseTo(i, raiseTo){
   clearTurnTimer();
   if(raisesThisRound>=MAX_RAISES_PER_ROUND){ playerCall(i); return; }
-  const p=players[i];
+
+  const p = players[i];
   raiseTo = Math.max(raiseTo, minRaiseTo());
   raiseTo = Math.min(raiseTo, p.bet + p.chips);
+
   const add = Math.max(0, raiseTo - p.bet);
   const pay = Math.min(add, p.chips);
   if(pay<=0){ playerCall(i); return; }
-  p.chips-=pay; p.bet+=pay; pot+=pay;
+
+  p.chips -= pay;
+  p.bet += pay;
+  pot += pay;
+
   toCall = Math.max(toCall, p.bet);
   raisesThisRound++;
+
+  // raise resets action requirement for others
+  resetOthersActedAfterRaise(i);
+
   elMsg.textContent = `${p.name} raises to ${p.bet}`;
   current = nextActiveIndex(i);
-  render();
+
   save();
+  render();
   tick();
 }
 
-/* ---------- Bots ---------- */
+/* -------------------- Bots -------------------- */
 function botDecision(i){
-  const p=players[i];
-  const need=Math.max(0,toCall-p.bet);
-  const stack=Math.max(1,p.chips);
+  const p = players[i];
+  const need = Math.max(0, toCall - p.bet);
+  const stack = Math.max(1, p.chips);
   const pressure = need/(stack+1);
 
+  // simple strength estimation: preflop heuristic + randomness
   if(stage==="PREFLOP"){
     const a=RVAL[p.hand[0].r], b=RVAL[p.hand[1].r];
     const pair=p.hand[0].r===p.hand[1].r;
     const suited=p.hand[0].s===p.hand[1].s;
     const high=Math.max(a,b);
     const gap=Math.abs(a-b);
+
     let score=0;
     score += pair?0.55:0;
     score += (high/14)*0.30;
@@ -492,22 +767,24 @@ function botDecision(i){
     score += (gap<=2)?0.06:0;
     score += (Math.random()-0.5)*0.06;
 
-    if(need===0) return (score>0.74 && Math.random()<0.35) ? "RAISE" : "CHECK";
-    if(score<0.33 && pressure>0.12 && Math.random()<0.8) return "FOLD";
-    if(score>0.78 && Math.random()<0.45) return "RAISE";
+    if(need===0) return (score>0.74 && raisesThisRound<MAX_RAISES_PER_ROUND && Math.random()<0.28) ? "RAISE" : "CHECK";
+    if(score<0.33 && pressure>0.12 && Math.random()<0.85) return "FOLD";
+    if(score>0.79 && raisesThisRound<MAX_RAISES_PER_ROUND && Math.random()<0.42) return "RAISE";
     return "CALL";
   }
 
-  const e=evaluate7([...p.hand,...board]);
-  let strength=(e.cat/8) + (Math.random()-0.5)*0.08;
+  // postflop: use own best category
+  const {ev} = bestOf7(p.hand.concat(board));
+  let strength = (ev.cat/8) + (Math.random()-0.5)*0.10;
 
-  if(need===0) return (strength>0.62 && Math.random()<0.30) ? "RAISE" : "CHECK";
+  if(need===0) return (strength>0.62 && raisesThisRound<MAX_RAISES_PER_ROUND && Math.random()<0.22) ? "RAISE" : "CHECK";
   if(strength<0.25 && pressure>0.14 && Math.random()<0.80) return "FOLD";
-  if(strength>0.72 && Math.random()<0.35) return "RAISE";
+  if(strength>0.72 && raisesThisRound<MAX_RAISES_PER_ROUND && Math.random()<0.30) return "RAISE";
   return "CALL";
 }
+
 function botAct(){
-  if(!handInProgress || menuOpen) return;
+  if(!handInProgress || menuOpen || paused) return;
 
   if(players[current].out || players[current].folded) current = nextActiveIndex(current);
 
@@ -516,19 +793,21 @@ function botAct(){
     return;
   }
 
-  const d=botDecision(current);
+  const d = botDecision(current);
   if(d==="FOLD") playerFold(current);
   else if(d==="CHECK") playerCheck(current);
   else if(d==="RAISE"){
     const p=players[current];
     const min=minRaiseTo();
     const max=p.bet+p.chips;
-    let target=min + Math.floor(Math.random()*3)*BIG_BLIND;
-    if(stage!=="PREFLOP"){
-      const e=evaluate7([...p.hand,...board]);
-      if(e.cat>=4) target+=BIG_BLIND*3;
-      if(e.cat>=6) target+=BIG_BLIND*5;
-    }
+
+    // raise sizing: random + stronger hands raise more
+    const {ev} = bestOf7(p.hand.concat(board));
+    let bump = 0;
+    if(ev.cat>=4) bump += BIG_BLIND*3;
+    if(ev.cat>=6) bump += BIG_BLIND*5;
+
+    let target = min + Math.floor(Math.random()*3)*BIG_BLIND + bump;
     target = clamp(target, min, max);
     playerRaiseTo(current, target);
   } else {
@@ -536,36 +815,28 @@ function botAct(){
   }
 }
 
-/* ---------- Tick ---------- */
-function tick(){
-  clearTimeout(botTimerId);
-  clearTurnTimer();
+/* -------------------- HERO info (combo + highlight + win%) -------------------- */
+function updateHeroInfo(){
+  heroComboText = "";
+  heroWinPct = null;
+  heroHighlightKeys.clear();
 
-  if(menuOpen) { updateButtons(); return; }
+  const hero = players[0];
+  if(!handInProgress || !hero || hero.out || hero.folded) return;
 
-  if(!handInProgress || stage==="IDLE" || stage==="SHOWDOWN"){
-    updateButtons();
-    return;
-  }
+  // combo name based on best 5 from 7 (hero hand + current board revealed)
+  const cards7 = hero.hand.concat(board);
+  if(cards7.length < 2) return;
 
-  if(players[current].out || players[current].folded){
-    current = nextActiveIndex(current);
-  }
+  const {ev, best5} = bestOf7(cards7);
+  heroComboText = catName(ev.cat);
+  for(const c of best5) heroHighlightKeys.add(cardKey(c));
 
-  renderHUD();
-  updateButtons();
-
-  if(!players[current].isBot){
-    elMsg.textContent = "Твой ход.";
-    startTurnTimer();
-    return;
-  }
-
-  elMsg.textContent = "Бот думает…";
-  botTimerId = setTimeout(()=>botAct(), BOT_THINK_MS);
+  // win% (only once per render tick; ok to compute on each render, but we keep it lightweight)
+  heroWinPct = monteCarloWinPct();
 }
 
-/* ---------- Render ---------- */
+/* -------------------- UI render -------------------- */
 function renderHUD(){
   elNick.textContent = nick ?? "-";
   elStage.textContent = stage;
@@ -588,16 +859,22 @@ function makeCardEl(text, hidden){
 }
 
 function render(){
+  // hero info & highlight
+  updateHeroInfo();
+
   // board
   elBoard.innerHTML="";
   for(let i=0;i<5;i++){
     const c=board[i];
-    elBoard.appendChild(makeCardEl(c ? (c.r+c.s) : "", !c));
+    const el = makeCardEl(c ? (c.r+c.s) : "", !c);
+    if(c && heroHighlightKeys.has(cardKey(c))) el.classList.add("neon");
+    elBoard.appendChild(el);
   }
 
   // seats
   elSeats.innerHTML="";
   const pos=["pos-0","pos-1","pos-2","pos-3","pos-4","pos-5"];
+
   for(let i=0;i<players.length;i++){
     const p=players[i];
     const seat=document.createElement("div");
@@ -630,8 +907,16 @@ function render(){
     const show = !p.isBot || stage==="SHOWDOWN" || !handInProgress;
 
     const c1=p.hand?.[0], c2=p.hand?.[1];
-    cards.appendChild(makeCardEl(c1 && show ? (c1.r+c1.s) : "", hidden || !show));
-    cards.appendChild(makeCardEl(c2 && show ? (c2.r+c2.s) : "", hidden || !show));
+
+    const el1 = makeCardEl(c1 && show ? (c1.r+c1.s) : "", hidden || !show);
+    const el2 = makeCardEl(c2 && show ? (c2.r+c2.s) : "", hidden || !show);
+
+    // neon on hero hole cards if included
+    if(i===0 && c1 && heroHighlightKeys.has(cardKey(c1))) el1.classList.add("neon");
+    if(i===0 && c2 && heroHighlightKeys.has(cardKey(c2))) el2.classList.add("neon");
+
+    cards.appendChild(el1);
+    cards.appendChild(el2);
 
     const bet=document.createElement("div");
     bet.className="bet";
@@ -642,6 +927,19 @@ function render(){
     seat.appendChild(cards);
     seat.appendChild(bet);
 
+    // Hero info under your cards
+    if(i===0){
+      const info = document.createElement("div");
+      info.className = "hero-info";
+      const left = document.createElement("div");
+      left.innerHTML = `Hand: <b>${heroComboText || "-"}</b>`;
+      const right = document.createElement("div");
+      right.innerHTML = `Win: <span class="pct">${heroWinPct===null ? "-" : heroWinPct + "%"}</span>`;
+      info.appendChild(left);
+      info.appendChild(right);
+      seat.appendChild(info);
+    }
+
     elSeats.appendChild(seat);
   }
 
@@ -649,19 +947,25 @@ function render(){
   updateButtons();
 }
 
+/* -------------------- Buttons enable/disable -------------------- */
 function updateButtons(){
   const you = players[0];
-  const yourTurn = tournamentStarted && handInProgress && current===0 && you && !you.folded && !you.out && !menuOpen;
+  const yourTurn =
+    tournamentStarted &&
+    handInProgress &&
+    current===0 &&
+    you && !you.folded && !you.out &&
+    !menuOpen && !paused;
 
   btnFold.disabled = !yourTurn;
   btnRaise.disabled = !yourTurn || raisesThisRound>=MAX_RAISES_PER_ROUND;
 
-  const need = you && handInProgress ? Math.max(0, toCall - you.bet) : 0;
+  const need = (you && handInProgress) ? Math.max(0, toCall - you.bet) : 0;
   btnCheck.disabled = !(yourTurn && need===0);
   btnCall.disabled  = !(yourTurn && need>0);
 }
 
-/* ---------- Raise Modal ---------- */
+/* -------------------- Raise modal -------------------- */
 function openRaiseModal(){
   const you=players[0];
   const min = clamp(minRaiseTo(), 0, you.bet+you.chips);
@@ -694,38 +998,169 @@ function syncRaiseFromInput(){
   raiseToLabel.textContent=String(v);
 }
 
-/* ---------- Menu open/close ---------- */
+/* -------------------- Menu controls injection -------------------- */
+function buildMenuControls(){
+  const modal = menuOverlay.querySelector(".modal");
+  if(!modal) return;
+
+  // remove old injected area if exists
+  const old = modal.querySelector(".menu-controls");
+  if(old) old.remove();
+
+  const wrap = document.createElement("div");
+  wrap.className = "menu-controls";
+
+  // Pause/Resume row
+  const row1 = document.createElement("div");
+  row1.className = "menu-row";
+  const st = document.createElement("div");
+  st.className = "label";
+  st.innerHTML = `Status: <b>${paused ? "PAUSED" : "RUNNING"}</b>`;
+  const btns = document.createElement("div");
+  btns.style.display="flex";
+  btns.style.gap="10px";
+  btns.style.flexWrap="wrap";
+
+  const pauseBtn = document.createElement("button");
+  pauseBtn.className = "btn";
+  pauseBtn.textContent = "Pause";
+  pauseBtn.onclick = ()=>{
+    paused = true;
+    clearTurnTimer();
+    save();
+    buildMenuControls();
+    render();
+  };
+
+  const resumeBtn = document.createElement("button");
+  resumeBtn.className = "btn accent";
+  resumeBtn.textContent = "Resume";
+  resumeBtn.onclick = ()=>{
+    paused = false;
+    save();
+    closeMenu(true); // start if needed
+  };
+
+  const newBtn = document.createElement("button");
+  newBtn.className = "btn danger";
+  newBtn.textContent = "New Tournament";
+  newBtn.onclick = ()=>{
+    if(!confirm("Сбросить турнир и начать заново?")) return;
+    // reset everyone
+    players.forEach(p=>{
+      p.out=false; p.folded=false; p.bet=0; p.hand=[]; p.acted=false;
+      p.chips = START_CHIPS;
+    });
+    dealer=0; stage="IDLE"; pot=0; board=[]; toCall=0; raisesThisRound=0;
+    handInProgress=false;
+    paused=true;
+    pendingAutoStartAfterMenu = true;
+    save();
+    render();
+    buildMenuControls();
+  };
+
+  btns.appendChild(pauseBtn);
+  btns.appendChild(resumeBtn);
+  btns.appendChild(newBtn);
+
+  row1.appendChild(st);
+  row1.appendChild(btns);
+
+  // Time setting row
+  const row2 = document.createElement("div");
+  row2.className = "menu-row";
+  const lab = document.createElement("div");
+  lab.className="label";
+  lab.textContent = "Turn time:";
+  const sel = document.createElement("select");
+  for(const v of TURN_SECONDS_OPTIONS){
+    const opt = document.createElement("option");
+    opt.value = String(v);
+    opt.textContent = `${v} sec`;
+    if(v===turnSeconds) opt.selected = true;
+    sel.appendChild(opt);
+  }
+  sel.onchange = ()=>{
+    turnSeconds = Number(sel.value);
+    save();
+    buildMenuControls();
+  };
+  row2.appendChild(lab);
+  row2.appendChild(sel);
+
+  wrap.appendChild(row1);
+  wrap.appendChild(row2);
+
+  modal.appendChild(wrap);
+}
+
+/* -------------------- Menu open/close -------------------- */
 function openMenu(){
   menuOpen = true;
   clearTurnTimer();
   show(menuOverlay,true);
-  // show timer frozen
+  buildMenuControls();
   renderHUD();
   updateButtons();
 }
-function closeMenu(){
+
+function closeMenu(fromResume=false){
   show(menuOverlay,false);
   menuOpen = false;
 
-  // If first time after nick and no hand yet -> start tournament now
-  if(pendingAutoStartAfterMenu && !handInProgress){
-    pendingAutoStartAfterMenu = false;
-    setTimeout(()=>startHandAuto(), 200);
-    return;
+  if(fromResume){
+    // if we haven't started a hand yet, start now
+    if(pendingAutoStartAfterMenu && !handInProgress){
+      pendingAutoStartAfterMenu = false;
+      setTimeout(()=>startHandAuto(), 200);
+      return;
+    }
   }
 
-  // continue normal flow
   tick();
 }
 
-/* ---------- Events ---------- */
-btnMenu.addEventListener("click", openMenu);
-btnCloseMenu.addEventListener("click", closeMenu);
+/* -------------------- Tick -------------------- */
+function tick(){
+  clearTimeout(botTimerId);
+  clearTurnTimer();
 
-btnFold.addEventListener("click", ()=> { if(current===0) playerFold(0); });
-btnCheck.addEventListener("click", ()=> { if(current===0) playerCheck(0); });
-btnCall.addEventListener("click", ()=> { if(current===0) playerCall(0); });
-btnRaise.addEventListener("click", ()=> { if(current===0) openRaiseModal(); });
+  if(menuOpen || paused){
+    updateButtons();
+    return;
+  }
+
+  if(!handInProgress || stage==="IDLE" || stage==="SHOWDOWN"){
+    updateButtons();
+    return;
+  }
+
+  if(players[current].out || players[current].folded){
+    current = nextActiveIndex(current);
+  }
+
+  renderHUD();
+  updateButtons();
+
+  if(!players[current].isBot){
+    elMsg.textContent = "Твой ход.";
+    startTurnTimer();
+    return;
+  }
+
+  elMsg.textContent = "Бот думает…";
+  botTimerId = setTimeout(()=>botAct(), BOT_THINK_MS);
+}
+
+/* -------------------- Events -------------------- */
+btnMenu.addEventListener("click", openMenu);
+btnCloseMenu.addEventListener("click", ()=>closeMenu(false));
+
+btnFold.addEventListener("click", ()=> { if(current===0 && !paused) playerFold(0); });
+btnCheck.addEventListener("click", ()=> { if(current===0 && !paused) playerCheck(0); });
+btnCall.addEventListener("click", ()=> { if(current===0 && !paused) playerCall(0); });
+btnRaise.addEventListener("click", ()=> { if(current===0 && !paused) openRaiseModal(); });
 
 raiseSlider.addEventListener("input", syncRaiseFromSlider);
 raiseInput.addEventListener("input", syncRaiseFromInput);
@@ -734,7 +1169,7 @@ btnRaiseClose.addEventListener("click", closeRaiseModal);
 btnRaiseConfirm.addEventListener("click", ()=>{
   const v=Number(raiseSlider.value);
   closeRaiseModal();
-  if(current===0) playerRaiseTo(0, v);
+  if(current===0 && !paused) playerRaiseTo(0, v);
 });
 btnRaiseMin.addEventListener("click", ()=>{ raiseSlider.value = raiseSlider.min; syncRaiseFromSlider(); });
 btnRaiseAll.addEventListener("click", ()=>{ raiseSlider.value = raiseSlider.max; syncRaiseFromSlider(); });
@@ -744,13 +1179,14 @@ btnRaiseHalf.addEventListener("click", ()=>{
   raiseSlider.value=String(v); syncRaiseFromSlider();
 });
 
-/* Nick immediately */
+/* -------------------- Nick immediately -------------------- */
 function openNick(){
   show(nickOverlay,true);
   const last = localStorage.getItem("poker_last_nick");
   if(last){ nickInput.value = last; nickInput.select(); }
   setTimeout(()=>nickInput.focus(), 30);
 }
+
 nickOk.addEventListener("click", ()=>{
   const n=nickInput.value.trim();
   if(!n){ nickInput.focus(); return; }
@@ -760,6 +1196,7 @@ nickOk.addEventListener("click", ()=>{
   const st = load(nick);
   if(st){
     turnSeconds = Number(st.turnSeconds ?? TURN_SECONDS_DEFAULT);
+    paused = !!st.paused;
     const t = st.tournament;
     if(t && t.players){
       players = t.players;
@@ -775,6 +1212,8 @@ nickOk.addEventListener("click", ()=>{
       tournamentStarted = !!t.tournamentStarted;
 
       if(players[0] && !players[0].isBot) players[0].name = nick;
+      // ensure acted flags exist
+      for(const p of players) if(typeof p.acted !== "boolean") p.acted = false;
     } else {
       ensureTournament();
     }
@@ -785,25 +1224,27 @@ nickOk.addEventListener("click", ()=>{
   show(nickOverlay,false);
   render();
 
-  // IMPORTANT: don't auto-start immediately
-  pendingAutoStartAfterMenu = !handInProgress; // start after menu close
+  // do not auto-run; open menu; require Resume
+  pendingAutoStartAfterMenu = !handInProgress;
   openMenu();
 
   save();
 });
+
 nickInput.addEventListener("keydown", (e)=>{ if(e.key==="Enter") nickOk.click(); });
 
-/* Boot */
+/* -------------------- Boot -------------------- */
 function boot(){
   openNick();
+
   // placeholder seats before nick
   players = [
-    {name:"YOU",isBot:false,chips:0,bet:0,folded:false,out:false,hand:[]},
-    {name:"BOT1",isBot:true,chips:0,bet:0,folded:false,out:false,hand:[]},
-    {name:"BOT2",isBot:true,chips:0,bet:0,folded:false,out:false,hand:[]},
-    {name:"BOT3",isBot:true,chips:0,bet:0,folded:false,out:false,hand:[]},
-    {name:"BOT4",isBot:true,chips:0,bet:0,folded:false,out:false,hand:[]},
-    {name:"BOT5",isBot:true,chips:0,bet:0,folded:false,out:false,hand:[]},
+    {name:"YOU",isBot:false,chips:0,bet:0,folded:false,out:false,acted:false,hand:[]},
+    {name:"BOT1",isBot:true,chips:0,bet:0,folded:false,out:false,acted:false,hand:[]},
+    {name:"BOT2",isBot:true,chips:0,bet:0,folded:false,out:false,acted:false,hand:[]},
+    {name:"BOT3",isBot:true,chips:0,bet:0,folded:false,out:false,acted:false,hand:[]},
+    {name:"BOT4",isBot:true,chips:0,bet:0,folded:false,out:false,acted:false,hand:[]},
+    {name:"BOT5",isBot:true,chips:0,bet:0,folded:false,out:false,acted:false,hand:[]},
   ];
   render();
 }
