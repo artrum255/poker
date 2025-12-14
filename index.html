@@ -3,41 +3,63 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Poker — Tournament + Shop</title>
+<title>Poker — Tournament (UI+FX)</title>
 <style>
   :root{
-    --bg1:#071413;
-    --bg2:#04100e;
+    --bg:#07110f;
     --felt1:#0f6a45;
-    --felt2:#074c33;
+    --felt2:#06402c;
+    --feltLine:#ffffff14;
+
+    --glass:#071215cc;
     --line:#ffffff18;
-    --glass:#0a1113cc;
+
     --text:#eaf5f1;
     --muted:#b5c9c1;
+
     --accent:#63f2c5;
     --warn:#ffd27a;
     --danger:#ff6b6b;
+
     --btn:#0b1417;
     --btn2:#0a1d1a;
+
     --card:#f7f8fc;
     --cardText:#0b0f12;
+
     --shadow:#00000070;
+
+    --neon:#63f2c5;
+    --neon2:#b8ffe9;
+
+    --turnSec: 15;
   }
+
+  /* Night theme overrides */
+  body.night{
+    --felt1:#4a4f55;
+    --felt2:#2c3036;
+    --bg:#0a0c10;
+    --card:#0b0f12;
+    --cardText:#eaf5f1;
+    --neon:#8aa3ff;
+    --neon2:#d7e0ff;
+  }
+
   *{box-sizing:border-box}
   html,body{height:100%}
   body{
     margin:0;
     font-family:system-ui,Segoe UI,Arial,sans-serif;
     color:var(--text);
-    background: radial-gradient(1200px 720px at 50% 28%, #0f3a2e, var(--bg2));
+    background: radial-gradient(1200px 720px at 50% 28%, #0f3a2e, var(--bg));
     overflow:hidden;
   }
 
-  /* FULL TABLE */
+  /* TABLE */
   .table{
     position:fixed; inset:0;
-    background:
-      radial-gradient(130% 110% at 50% 42%, var(--felt1), var(--felt2));
+    background: radial-gradient(130% 110% at 50% 42%, var(--felt1), var(--felt2));
     overflow:hidden;
   }
   .table::before{
@@ -45,7 +67,7 @@
     position:absolute;
     inset:min(3.6vh, 26px);
     border-radius:999px;
-    border:2px solid #ffffff14;
+    border:2px solid var(--feltLine);
     pointer-events:none;
   }
   .table::after{
@@ -65,7 +87,7 @@
     flex-wrap:wrap;
     justify-content:center;
     padding:8px;
-    z-index:10;
+    z-index:20;
   }
   .pill{
     display:inline-flex;
@@ -81,29 +103,28 @@
   }
   .pill b{ color:var(--text); }
 
-  /* Message */
   .msg{
     position:absolute;
     left:50%;
     top:92px;
     transform:translateX(-50%);
-    width:min(760px, 92vw);
+    width:min(860px, 92vw);
     text-align:center;
     font-size:14px;
     color:var(--text);
     opacity:.95;
-    z-index:10;
+    z-index:20;
     min-height:18px;
     text-shadow: 0 6px 18px #00000066;
   }
 
-  /* Board */
+  /* CENTER BOARD */
   .center{
     position:absolute;
     left:50%; top:50%;
     transform:translate(-50%,-50%);
-    width:min(760px, 92vw);
-    z-index:6;
+    width:min(860px, 92vw);
+    z-index:10;
     text-align:center;
   }
   .board{
@@ -114,17 +135,17 @@
     margin:0;
   }
 
-  /* Seats */
+  /* SEATS */
   .seat{
     position:absolute;
-    width:250px;
+    width:260px;
     padding:10px;
     border-radius:18px;
     background: linear-gradient(180deg, #071215cc, #07121599);
     border:1px solid var(--line);
     box-shadow: 0 14px 40px var(--shadow);
     backdrop-filter: blur(10px);
-    z-index:8;
+    z-index:14;
   }
   .seat .top{
     display:flex;
@@ -133,9 +154,18 @@
     gap:10px;
     margin-bottom:8px;
   }
+  .leftname{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    min-width:0;
+  }
   .name{
     font-weight:900;
     letter-spacing:.2px;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
   }
   .tag{
     font-size:12px;
@@ -147,6 +177,7 @@
   }
   .tag.turn{ color:var(--accent); border-color:#63f2c540; }
   .tag.out{ color:var(--danger); border-color:#ff6b6b55; }
+
   .meta{
     display:flex;
     justify-content:space-between;
@@ -160,7 +191,7 @@
     gap:8px;
     min-height:78px;
   }
-  .cards.folded{ filter: grayscale(1); opacity:0.40; }
+  .cards.folded{ filter: grayscale(1); opacity:0.35; }
 
   .card{
     width:56px; height:76px;
@@ -183,6 +214,10 @@
     color:#ffffffaa;
     border-color:#ffffff18;
   }
+  body.night .card.hidden{
+    background: linear-gradient(135deg, #0b1016, #0a0f14);
+    border-color:#ffffff18;
+  }
   .card small{
     position:absolute;
     left:8px; top:6px;
@@ -191,12 +226,22 @@
     opacity:.92;
   }
   .card .suit{ font-size:22px; }
+
   .card.deal{
     opacity:0;
     transform: translateY(-10px) scale(0.96);
-    animation: popin .28s ease forwards;
+    animation: popin .26s ease forwards;
   }
   @keyframes popin{ to{ opacity:1; transform: translateY(0) scale(1);} }
+
+  /* Neon highlight for best hand cards */
+  .card.neon{
+    box-shadow:
+      0 10px 22px #00000055,
+      0 0 0 2px color-mix(in srgb, var(--neon) 65%, transparent),
+      0 0 18px color-mix(in srgb, var(--neon) 55%, transparent),
+      0 0 36px color-mix(in srgb, var(--neon2) 35%, transparent);
+  }
 
   .bet{
     margin-top:8px;
@@ -205,52 +250,48 @@
     min-height:16px;
   }
 
-  /* Seat positions */
-  .pos-0{ left:50%; bottom:96px; transform:translateX(-50%); } /* YOU, leave space for action bar */
+  /* Positions */
+  .pos-0{ left:50%; bottom:120px; transform:translateX(-50%); } /* YOU */
   .pos-1{ left:18px; bottom:180px; }
   .pos-2{ left:18px; top:140px; }
   .pos-3{ left:50%; top:120px; transform:translateX(-50%); }
   .pos-4{ right:18px; top:140px; }
   .pos-5{ right:18px; bottom:180px; }
 
-  /* Action bar bottom-right (requested) */
-  .actionbar{
+  /* BOTTOM RIGHT ACTIONS (separate buttons) */
+  .actions{
     position:absolute;
     right:14px;
     bottom:14px;
+    z-index:30;
     display:flex;
+    flex-direction:column;
     gap:10px;
     align-items:flex-end;
-    z-index:20;
-  }
-  .actionbox{
-    padding:10px;
-    border-radius:18px;
-    background: linear-gradient(180deg, #071215dd, #071215aa);
-    border:1px solid var(--line);
-    box-shadow: 0 18px 60px var(--shadow);
-    backdrop-filter: blur(10px);
-    min-width: 340px;
   }
   .actionrow{
     display:flex;
-    gap:8px;
+    gap:10px;
     flex-wrap:wrap;
     justify-content:flex-end;
   }
   .btn{
-    padding:10px 12px;
+    padding:10px 14px;
     border-radius:14px;
     border:1px solid var(--line);
     background: var(--btn);
     color:var(--text);
-    font-weight:900;
+    font-weight:950;
     cursor:pointer;
-    transition: transform .08s ease, border-color .12s ease, background .12s ease;
+    box-shadow: 0 10px 28px #00000055;
+    backdrop-filter: blur(8px);
+    transition: transform .08s ease, border-color .12s ease, filter .12s ease;
+    user-select:none;
   }
-  .btn:hover{ border-color:#ffffff35; }
+  .btn:hover{ border-color:#ffffff35; filter:brightness(1.05); }
   .btn:active{ transform: translateY(1px); }
-  .btn:disabled{ opacity:.45; cursor:not-allowed; }
+  .btn:disabled{ opacity:.40; cursor:not-allowed; box-shadow:none; }
+
   .btn-accent{
     background: linear-gradient(180deg, #0d2b24, #071a16);
     border-color:#63f2c540;
@@ -263,16 +304,128 @@
     background: linear-gradient(180deg, #2b1012, #19080a);
     border-color:#ff6b6b55;
   }
-  .mini{
-    font-size:12px;
-    color:var(--muted);
-    margin-top:8px;
+
+  .statusbox{
+    padding:10px 12px;
+    border-radius:18px;
+    background: linear-gradient(180deg, #071215dd, #071215aa);
+    border:1px solid var(--line);
+    box-shadow: 0 18px 60px var(--shadow);
+    backdrop-filter: blur(10px);
+    width:min(520px, 92vw);
+  }
+  .status-top{
     display:flex;
+    align-items:center;
     justify-content:space-between;
     gap:10px;
+    color:var(--muted);
+    font-size:13px;
+  }
+  .status-top b{ color:var(--text); }
+  .combobox{
+    margin-top:8px;
+    display:flex;
+    align-items:flex-end;
+    justify-content:space-between;
+    gap:12px;
+    flex-wrap:wrap;
+  }
+  .combo{
+    font-weight:950;
+    letter-spacing:.2px;
+  }
+  .winpct{
+    color:var(--accent);
+    font-weight:950;
   }
 
-  /* Chip fly */
+  /* Turn timer */
+  .timer{
+    margin-top:10px;
+    height:10px;
+    border-radius:999px;
+    background:#00000030;
+    border:1px solid var(--line);
+    overflow:hidden;
+  }
+  .timer > div{
+    height:100%;
+    width:100%;
+    background: linear-gradient(90deg, var(--accent), var(--warn));
+    transform-origin:left;
+    transform:scaleX(1);
+  }
+
+  /* Chips visuals */
+  .chips{
+    display:flex;
+    align-items:center;
+    gap:10px;
+  }
+  .stack{
+    position:relative;
+    width:44px;
+    height:30px;
+  }
+  .chip{
+    position:absolute;
+    left:0;
+    width:44px;
+    height:14px;
+    border-radius:999px;
+    background: radial-gradient(circle at 35% 35%, #ffffff55, #00000000 55%),
+                linear-gradient(180deg, #f7d46a, #b07b1c);
+    border:1px solid #0000002a;
+    box-shadow: 0 8px 18px #00000055;
+  }
+  body.night .chip{
+    background: radial-gradient(circle at 35% 35%, #ffffff55, #00000000 55%),
+                linear-gradient(180deg, #9fb3ff, #3b4d9b);
+  }
+  .stack .chip:nth-child(1){ bottom:0px }
+  .stack .chip:nth-child(2){ bottom:6px }
+  .stack .chip:nth-child(3){ bottom:12px }
+  .stack .chip:nth-child(4){ bottom:18px }
+  .stack .chip:nth-child(5){ bottom:24px }
+  .stackLabel{
+    font-size:12px;
+    color:var(--muted);
+    white-space:nowrap;
+  }
+
+  /* Pot chips in center */
+  .potChips{
+    margin-top:10px;
+    display:flex;
+    justify-content:center;
+    gap:10px;
+    align-items:center;
+    color:var(--muted);
+    font-size:13px;
+  }
+
+  /* Avatars */
+  .avatar{
+    width:28px; height:28px;
+    border-radius:999px;
+    border:1px solid var(--line);
+    background:#00000030;
+    overflow:hidden;
+    flex:0 0 auto;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    font-weight:900;
+    color:var(--text);
+  }
+  .avatar img{
+    width:100%; height:100%;
+    object-fit:cover;
+    display:block;
+  }
+
+  /* CHIP FLY */
   .chip-fly{
     position:absolute;
     left:50%; top:50%;
@@ -287,7 +440,7 @@
     pointer-events:none;
     opacity:0;
     animation: fly .7s ease forwards;
-    z-index:30;
+    z-index:40;
   }
   @keyframes fly{
     0% { opacity:0; transform:translate(-50%,-50%) translateY(10px) scale(.95); }
@@ -295,18 +448,18 @@
     100%{ opacity:0; transform:translate(-50%,-50%) translateY(-26px) scale(1); }
   }
 
-  /* Overlay / modal */
+  /* OVERLAYS */
   .overlay{
     position:fixed; inset:0;
     display:none;
     align-items:center;
     justify-content:center;
     background:#00000088;
-    z-index:50;
+    z-index:60;
     padding:16px;
   }
   .modal{
-    width:min(640px, 96vw);
+    width:min(720px, 96vw);
     border-radius:20px;
     background: linear-gradient(180deg, #071215f2, #071215d8);
     border:1px solid var(--line);
@@ -314,12 +467,14 @@
     padding:14px;
   }
   .modal h2{ margin:0 0 10px; font-size:20px; }
+  .small{ font-size:13px; color:var(--muted); line-height:1.35; }
   .field{
     display:flex;
     gap:8px;
     align-items:center;
+    flex-wrap:wrap;
   }
-  .field input{
+  .field input[type="text"], .field input[type="number"]{
     width:100%;
     padding:10px 12px;
     border-radius:14px;
@@ -329,49 +484,24 @@
     outline:none;
     font-weight:900;
   }
-  .menu-grid{
+  .field input[type="file"]{
+    width:100%;
+    color:var(--muted);
+  }
+  .grid3{
     display:grid;
     grid-template-columns: 1fr 1fr 1fr;
     gap:10px;
     margin-top:12px;
   }
   @media (max-width: 760px){
-    .menu-grid{ grid-template-columns:1fr; }
-    .actionbox{ min-width: 280px; }
-    .pos-0{ bottom:120px; }
+    .grid3{ grid-template-columns:1fr; }
+    .pos-0{ bottom:150px; }
   }
-  .small{ font-size:13px; color:var(--muted); line-height:1.35; }
-  .range{ width:100%; }
   .kv{ display:flex; justify-content:space-between; gap:10px; font-size:13px; color:var(--muted); }
   .kv b{ color:var(--text); }
+  .range{ width:100%; }
   .mono{ font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-
-  /* Lobby mock */
-  .lobby{
-    display:grid;
-    gap:10px;
-    margin-top:10px;
-  }
-  .tbl{
-    border:1px solid var(--line);
-    border-radius:16px;
-    padding:10px;
-    background:#00000022;
-  }
-  .tbl-head{
-    display:flex; justify-content:space-between; align-items:center;
-    gap:10px; flex-wrap:wrap;
-  }
-  .seats-mini{ display:flex; gap:6px; flex-wrap:wrap; margin-top:8px; }
-  .seat-mini{
-    padding:6px 8px;
-    border:1px solid var(--line);
-    border-radius:999px;
-    color:var(--muted);
-    font-size:12px;
-    background:#00000022;
-  }
-  .seat-mini.you{ color:var(--accent); border-color:#63f2c540; }
 </style>
 </head>
 
@@ -380,7 +510,7 @@
   <div class="hud">
     <span class="pill">👤 <span id="hudNick">-</span></span>
     <span class="pill">💶 EUR: <b id="hudEur">0</b></span>
-    <span class="pill">💰 Chips: <b id="hudWalletChips">0</b></span>
+    <span class="pill">💰 Wallet: <b id="hudWalletChips">0</b></span>
     <span class="pill">🃏 <span id="hudStage">IDLE</span></span>
     <span class="pill">Pot: <b id="hudPot">0</b></span>
     <span class="pill">To call: <b id="hudToCall">0</b></span>
@@ -391,42 +521,58 @@
 
   <div class="center">
     <div class="board" id="board"></div>
+    <div class="potChips">
+      <div class="stack" id="potStack" aria-hidden="true"></div>
+      <div>Pot chips: <b id="potChipsLabel">0</b></div>
+    </div>
   </div>
 
-  <div class="actionbar">
-    <div class="actionbox">
-      <div class="actionrow">
-        <button class="btn btn-accent" id="btnMenu">☰ Menu</button>
-        <button class="btn btn-warn" id="btnShop">🛒 Shop</button>
-        <button class="btn btn-accent" id="btnStartResume">Start/Resume</button>
-        <button class="btn btn-accent" id="btnNextHand">Next Hand</button>
+  <!-- Bottom right: separate buttons + status -->
+  <div class="actions">
+    <div class="statusbox">
+      <div class="status-top">
+        <span>Raise min: <b id="raiseMinTop">0</b> | max: <b id="raiseMaxTop">0</b></span>
+        <span>⏱️ <b id="turnLeft">0</b>s</span>
       </div>
 
-      <div class="actionrow" style="margin-top:8px">
-        <button class="btn btn-danger" id="btnFold">Fold</button>
-        <button class="btn" id="btnCheck">Check</button>
-        <button class="btn" id="btnCall">Call</button>
-        <button class="btn btn-accent" id="btnRaise">Raise</button>
+      <div class="combobox">
+        <div>
+          <div class="combo" id="comboName">—</div>
+          <div class="small" id="comboDetail">Комбинация и шанс появятся после раздачи</div>
+        </div>
+        <div class="winpct" id="winPct">—</div>
       </div>
 
-      <div class="mini">
-        <span>Raise min: <b id="raiseMin">0</b></span>
-        <span>Raise max: <b id="raiseMax">0</b></span>
+      <div class="timer"><div id="timerBar"></div></div>
+      <div class="chips" style="margin-top:10px">
+        <div class="stack" id="youStack" aria-hidden="true"></div>
+        <div class="stackLabel">Your chips: <b id="youChipsLabel">0</b></div>
       </div>
+    </div>
+
+    <div class="actionrow">
+      <button class="btn btn-accent" id="btnMenu">☰ Menu</button>
+      <button class="btn btn-warn" id="btnShop">🛒 Shop</button>
+    </div>
+    <div class="actionrow">
+      <button class="btn btn-danger" id="btnFold">Fold</button>
+      <button class="btn" id="btnCheck">Check</button>
+      <button class="btn" id="btnCall">Call</button>
+      <button class="btn btn-accent" id="btnRaise">Raise</button>
     </div>
   </div>
 </div>
 
-<!-- Nick (ask immediately) -->
+<!-- Nick -->
 <div class="overlay" id="nickOverlay">
   <div class="modal">
     <h2>Введи ник</h2>
     <div class="field">
-      <input id="nickInput" maxlength="20" placeholder="например: artrum255" />
+      <input id="nickInput" type="text" maxlength="20" placeholder="например: artrum255" />
       <button class="btn btn-accent" id="nickOk">OK</button>
     </div>
     <div class="small" style="margin-top:8px">
-      Новый ник получает <b>1000 chips</b> и <b>0 EUR</b>. Сохранение в браузере.
+      Новый ник получает <b>1000</b> фишек и <b>0</b> EUR. Сохранение по нику в браузере.
     </div>
   </div>
 </div>
@@ -436,14 +582,13 @@
   <div class="modal">
     <h2>Меню</h2>
     <div class="small">
-      • <b>Турнир</b> — ты против ботов, вылет при 0, +10 EUR если ты чемпион.<br>
-      • <b>Магазин</b> — покупка фишек за EUR.<br>
-      • <b>Играть</b> — демо-лобби (реальный онлайн требует сервер).
+      • Турнир: вылет при 0, +10 EUR если ты чемпион.<br>
+      • Settings: тема, время хода, звук, аватар.
     </div>
-    <div class="menu-grid">
+    <div class="grid3">
       <button class="btn btn-accent" id="btnGoTournament">Турнир</button>
-      <button class="btn btn-warn" id="btnGoShop">Магазин</button>
-      <button class="btn" id="btnGoPlay">Играть</button>
+      <button class="btn btn-warn" id="btnGoShop2">Магазин</button>
+      <button class="btn" id="btnGoSettings">Settings</button>
     </div>
     <div class="field" style="margin-top:12px; justify-content:flex-end">
       <button class="btn" id="btnCloseMenu">Close</button>
@@ -456,24 +601,23 @@
   <div class="modal">
     <h2>🛒 Магазин</h2>
     <div class="small">EUR: <b id="shopEur">0</b> | Wallet chips: <b id="shopChips">0</b></div>
-    <div class="menu-grid" style="grid-template-columns:1fr; margin-top:12px">
+    <div class="grid3" style="grid-template-columns:1fr; margin-top:12px">
       <button class="btn btn-accent" data-buy="1000">Купить 1 000 chips — 10 EUR</button>
       <button class="btn btn-accent" data-buy="10000">Купить 10 000 chips — 90 EUR</button>
       <button class="btn btn-accent" data-buy="100000">Купить 100 000 chips — 390 EUR</button>
     </div>
     <div class="field" style="margin-top:12px; justify-content:space-between">
-      <button class="btn" id="btnShopBackMenu">☰ Menu</button>
+      <button class="btn" id="btnShopBack">☰ Menu</button>
       <button class="btn" id="btnShopClose">Close</button>
     </div>
   </div>
 </div>
 
-<!-- Raise modal -->
+<!-- Raise -->
 <div class="overlay" id="raiseOverlay">
   <div class="modal">
     <h2>Raise</h2>
     <div class="small">Выбери сумму “raise to” (до какого общего bet поднять).</div>
-
     <div class="kv" style="margin-top:10px">
       <span>Raise to:</span>
       <span><b id="raiseToLabel">0</b></span>
@@ -487,35 +631,58 @@
 
     <div class="field" style="margin-top:10px; justify-content:space-between">
       <button class="btn" id="btnRaiseMin">Min</button>
-      <button class="btn" id="btnRaiseHalf">Half stack</button>
+      <button class="btn" id="btnRaiseHalf">Half</button>
       <button class="btn" id="btnRaiseAll">All-in</button>
       <button class="btn" id="btnRaiseClose">Close</button>
     </div>
   </div>
 </div>
 
-<!-- Play lobby (mock) -->
-<div class="overlay" id="playOverlay">
+<!-- Settings -->
+<div class="overlay" id="settingsOverlay">
   <div class="modal">
-    <h2>🎮 Играть (демо-лобби)</h2>
-    <div class="small">Тут “онлайн игроки” — имитация. Для реальных игроков нужен сервер.</div>
-    <div class="lobby" id="lobby"></div>
+    <h2>Settings</h2>
+    <div class="small">Настройки сохраняются по нику.</div>
+
+    <div class="grid3" style="grid-template-columns:1fr;">
+      <button class="btn btn-accent" id="btnToggleTheme">Toggle Day/Night</button>
+
+      <div style="margin-top:6px">
+        <div class="kv"><span>Время на ход (сек):</span><b id="turnSecLabel">15</b></div>
+        <input class="range" id="turnSecSlider" type="range" min="5" max="30" value="15" />
+      </div>
+
+      <div style="margin-top:6px">
+        <div class="kv"><span>Звук:</span><b id="soundLabel">ON</b></div>
+        <button class="btn" id="btnToggleSound">Toggle Sound</button>
+      </div>
+
+      <div style="margin-top:6px">
+        <div class="small">Аватар (загрузка картинки):</div>
+        <input id="avatarFile" type="file" accept="image/*" />
+      </div>
+    </div>
+
     <div class="field" style="margin-top:12px; justify-content:space-between">
-      <button class="btn" id="btnPlayBackMenu">☰ Menu</button>
-      <button class="btn" id="btnPlayClose">Close</button>
+      <button class="btn" id="btnSettingsBack">☰ Menu</button>
+      <button class="btn" id="btnSettingsClose">Close</button>
     </div>
   </div>
 </div>
 
 <script>
-/* ========= Settings ========= */
+/* =========================
+   CONFIG
+========================= */
 const START_CHIPS = 1000;
 const SMALL_BLIND = 10;
 const BIG_BLIND = 20;
 const BOT_COUNT = 5;
 const MAX_RAISES_PER_ROUND = 4;
-const BOT_THINK_MS = 260;
-const STREET_PAUSE_MS = 900; // <<< pauses between flop/turn/river/showdown
+const BOT_THINK_MS = 280;
+
+const STREET_PAUSE_MS = 850; // small pause between streets
+const AUTO_NEXT_HAND_MS = 1100; // auto next hand after showdown
 
 const SHOP_PRICES = { 1000:10, 10000:90, 100000:390 };
 
@@ -523,35 +690,55 @@ const SUITS = ["♣","♦","♥","♠"];
 const RANKS = ["2","3","4","5","6","7","8","9","T","J","Q","K","A"];
 const RVAL = Object.fromEntries(RANKS.map((r,i)=>[r, i+2]));
 
-/* ========= State ========= */
+/* Monte Carlo win odds */
+const ODDS_ITERS = 1200; // speed vs accuracy
+
+/* =========================
+   STATE
+========================= */
 let nick = null;
 let saveKey = null;
+
+/* profile / wallet */
 let walletEUR = 0;
 let walletChips = 0;
 
-let view = "TOURNAMENT"; // TOURNAMENT/SHOP/PLAY
+/* settings */
+let settingNight = false;
+let settingTurnSec = 15;
+let settingSound = true;
+let settingAvatarDataURL = null;
 
+/* tournament */
 let players = [];
 let deck = [];
 let board = [];
 let pot = 0;
-let stage = "IDLE";
+let stage = "IDLE"; // PREFLOP/FLOP/TURN/RIVER/SHOWDOWN/IDLE
 let dealer = 0, sb = 1, bb = 2;
 let current = 0;
 let toCall = 0;
 let raisesThisRound = 0;
-let awaitingHuman = false;
-let tournamentStarted = false;
 let handInProgress = false;
+let awaitingHuman = false;
 
+/* timers */
 let botTimer = null;
-let transitionTimer = null;
+let streetTimer = null;
+let nextHandTimer = null;
+let turnTimer = null;
+let turnDeadline = 0;
 
-/* ========= UI ========= */
+/* ui state */
+let bestHandForYou = null; // {cat, name, cardsKeySet:Set}
+let winPctForYou = null;
+
+/* =========================
+   UI refs
+========================= */
 const elTable = document.getElementById("table");
 const elBoard = document.getElementById("board");
 const elMsg = document.getElementById("msg");
-const elLog = document.getElementById("log"); // may not exist now; keep safe
 
 const hudNick = document.getElementById("hudNick");
 const hudEur = document.getElementById("hudEur");
@@ -561,34 +748,45 @@ const hudPot = document.getElementById("hudPot");
 const hudToCall = document.getElementById("hudToCall");
 const hudDealer = document.getElementById("hudDealer");
 
+const potStack = document.getElementById("potStack");
+const potChipsLabel = document.getElementById("potChipsLabel");
+
+const youStack = document.getElementById("youStack");
+const youChipsLabel = document.getElementById("youChipsLabel");
+
+const comboName = document.getElementById("comboName");
+const comboDetail = document.getElementById("comboDetail");
+const winPct = document.getElementById("winPct");
+
+const raiseMinTop = document.getElementById("raiseMinTop");
+const raiseMaxTop = document.getElementById("raiseMaxTop");
+
+const turnLeft = document.getElementById("turnLeft");
+const timerBar = document.getElementById("timerBar");
+
 const btnMenu = document.getElementById("btnMenu");
 const btnShop = document.getElementById("btnShop");
-const btnStartResume = document.getElementById("btnStartResume");
-const btnNextHand = document.getElementById("btnNextHand");
-
 const btnFold = document.getElementById("btnFold");
 const btnCheck = document.getElementById("btnCheck");
 const btnCall = document.getElementById("btnCall");
 const btnRaise = document.getElementById("btnRaise");
 
-const raiseMinTop = document.getElementById("raiseMin");
-const raiseMaxTop = document.getElementById("raiseMax");
-
+/* overlays */
 const nickOverlay = document.getElementById("nickOverlay");
 const nickInput = document.getElementById("nickInput");
 const nickOk = document.getElementById("nickOk");
 
 const menuOverlay = document.getElementById("menuOverlay");
 const btnGoTournament = document.getElementById("btnGoTournament");
-const btnGoShop = document.getElementById("btnGoShop");
-const btnGoPlay = document.getElementById("btnGoPlay");
+const btnGoShop2 = document.getElementById("btnGoShop2");
+const btnGoSettings = document.getElementById("btnGoSettings");
 const btnCloseMenu = document.getElementById("btnCloseMenu");
 
 const shopOverlay = document.getElementById("shopOverlay");
 const shopEur = document.getElementById("shopEur");
 const shopChips = document.getElementById("shopChips");
+const btnShopBack = document.getElementById("btnShopBack");
 const btnShopClose = document.getElementById("btnShopClose");
-const btnShopBackMenu = document.getElementById("btnShopBackMenu");
 
 const raiseOverlay = document.getElementById("raiseOverlay");
 const raiseSlider = document.getElementById("raiseSlider");
@@ -600,69 +798,23 @@ const btnRaiseMin = document.getElementById("btnRaiseMin");
 const btnRaiseHalf = document.getElementById("btnRaiseHalf");
 const btnRaiseAll = document.getElementById("btnRaiseAll");
 
-const playOverlay = document.getElementById("playOverlay");
-const lobby = document.getElementById("lobby");
-const btnPlayClose = document.getElementById("btnPlayClose");
-const btnPlayBackMenu = document.getElementById("btnPlayBackMenu");
+const settingsOverlay = document.getElementById("settingsOverlay");
+const btnToggleTheme = document.getElementById("btnToggleTheme");
+const turnSecSlider = document.getElementById("turnSecSlider");
+const turnSecLabel = document.getElementById("turnSecLabel");
+const btnToggleSound = document.getElementById("btnToggleSound");
+const soundLabel = document.getElementById("soundLabel");
+const avatarFile = document.getElementById("avatarFile");
+const btnSettingsBack = document.getElementById("btnSettingsBack");
+const btnSettingsClose = document.getElementById("btnSettingsClose");
 
-/* ========= Persistence ========= */
-function keyForNick(n){ return `poker_v3_${n.toLowerCase()}`; }
-
-function saveAll(){
-  if(!saveKey) return;
-  const state = {
-    version: 3,
-    nick, walletEUR, walletChips,
-    tournament: {
-      players, deck, board, pot, stage,
-      dealer, sb, bb, current, toCall, raisesThisRound,
-      tournamentStarted, handInProgress
-    }
-  };
-  localStorage.setItem(saveKey, JSON.stringify(state));
-  localStorage.setItem("poker_last_nick", nick);
-}
-function loadAll(n){
-  const k = keyForNick(n);
-  const raw = localStorage.getItem(k);
-  if(!raw) return null;
-  try { return JSON.parse(raw); } catch { return null; }
-}
-function ensureProfile(){
-  const st = loadAll(nick);
-  if(!st){
-    walletEUR = 0;
-    walletChips = START_CHIPS;
-    clearTournament();
-    tournamentStarted = false;
-    stage = "IDLE";
-    saveAll();
-    return;
-  }
-  walletEUR = Number(st.walletEUR ?? 0);
-  walletChips = Number(st.walletChips ?? START_CHIPS);
-
-  const t = st.tournament;
-  if(t && t.players && t.players.length){
-    players = t.players;
-    deck = t.deck ?? [];
-    board = t.board ?? [];
-    pot = t.pot ?? 0;
-    stage = t.stage ?? "IDLE";
-    dealer = t.dealer ?? 0; sb = t.sb ?? 1; bb = t.bb ?? 2;
-    current = t.current ?? 0;
-    toCall = t.toCall ?? 0;
-    raisesThisRound = t.raisesThisRound ?? 0;
-    tournamentStarted = !!t.tournamentStarted;
-    handInProgress = !!t.handInProgress;
-    if(players[0] && !players[0].isBot) players[0].name = nick;
-  } else {
-    clearTournament();
-  }
-}
-
-/* ========= Helpers ========= */
+/* =========================
+   UTILS
+========================= */
 function show(el, yes){ el.style.display = yes ? "flex" : "none"; }
+function clamp(x,a,b){ return Math.max(a, Math.min(b, x)); }
+function cardKey(c){ return c.r + c.s; }
+
 function chipFly(text){
   const el = document.createElement("div");
   el.className = "chip-fly";
@@ -670,6 +822,97 @@ function chipFly(text){
   elTable.appendChild(el);
   setTimeout(()=>el.remove(), 750);
 }
+
+/* create simple stack of up to 5 chips depending on size */
+function renderStack(el, amount){
+  el.innerHTML = "";
+  const levels = amount <= 0 ? 0 : (amount < 50 ? 1 : amount < 200 ? 2 : amount < 600 ? 3 : amount < 1500 ? 4 : 5);
+  for(let i=0;i<levels;i++){
+    const c = document.createElement("div");
+    c.className = "chip";
+    el.appendChild(c);
+  }
+}
+
+/* =========================
+   SOUND (WebAudio, no files)
+========================= */
+let audioCtx = null;
+function ensureAudio(){
+  if(!settingSound) return;
+  if(!audioCtx){
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  if(audioCtx.state === "suspended") audioCtx.resume().catch(()=>{});
+}
+function beep(freq, dur=0.06, type="sine", vol=0.06){
+  if(!settingSound) return;
+  ensureAudio();
+  if(!audioCtx) return;
+  const o = audioCtx.createOscillator();
+  const g = audioCtx.createGain();
+  o.type = type;
+  o.frequency.value = freq;
+  g.gain.value = 0.0001;
+  o.connect(g);
+  g.connect(audioCtx.destination);
+
+  const t = audioCtx.currentTime;
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(vol, t+0.01);
+  g.gain.exponentialRampToValueAtTime(0.0001, t+dur);
+
+  o.start(t);
+  o.stop(t+dur+0.02);
+}
+const SFX = {
+  deal(){ beep(520, 0.04, "triangle", 0.04); },
+  chip(){ beep(280, 0.06, "square", 0.035); },
+  click(){ beep(720, 0.03, "sine", 0.03); },
+  win(){ beep(440, 0.08, "sine", 0.05); setTimeout(()=>beep(660,0.08,"sine",0.05), 70); }
+};
+
+/* =========================
+   PERSISTENCE
+========================= */
+function keyForNick(n){ return `poker_fx_${n.toLowerCase()}`; }
+
+function saveAll(){
+  if(!saveKey) return;
+  const state = {
+    v:1,
+    nick,
+    walletEUR, walletChips,
+    settings: {
+      night: settingNight,
+      turnSec: settingTurnSec,
+      sound: settingSound,
+      avatar: settingAvatarDataURL
+    },
+    tournament: {
+      players, deck, board, pot, stage,
+      dealer, sb, bb, current, toCall, raisesThisRound,
+      handInProgress
+    }
+  };
+  localStorage.setItem(saveKey, JSON.stringify(state));
+  localStorage.setItem("poker_last_nick", nick);
+}
+
+function loadAll(n){
+  const raw = localStorage.getItem(keyForNick(n));
+  if(!raw) return null;
+  try { return JSON.parse(raw); } catch { return null; }
+}
+
+function applyTheme(){
+  document.body.classList.toggle("night", !!settingNight);
+  document.documentElement.style.setProperty("--turnSec", String(settingTurnSec));
+}
+
+/* =========================
+   DECK / PLAYERS
+========================= */
 function newDeck(){
   const d = [];
   for(const s of SUITS) for(const r of RANKS) d.push({r,s});
@@ -679,7 +922,7 @@ function newDeck(){
   }
   return d;
 }
-function inHandPlayers(){ return players.filter(p => !p.out && !p.folded); }
+
 function nextActiveIndex(from){
   const n = players.length;
   for(let k=1;k<=n;k++){
@@ -696,87 +939,74 @@ function nextNotOutIndex(from){
   }
   return from;
 }
+function inHandPlayers(){ return players.filter(p => !p.out && !p.folded); }
+function alivePlayers(){ return players.filter(p => !p.out); }
 function onlyOneLeftInHand(){ return inHandPlayers().length === 1; }
-function clamp(x,a,b){ return Math.max(a, Math.min(b, x)); }
 
-/* ========= Evaluator ========= */
-function straightHigh(uniqueRanksDesc){
-  const set = new Set(uniqueRanksDesc);
-  if(set.has(14) && set.has(5) && set.has(4) && set.has(3) && set.has(2)) return 5;
-  for(let hi=14;hi>=5;hi--){
-    let ok=true;
-    for(let d=0;d<5;d++){
-      if(!set.has(hi-d)){ ok=false; break; }
-    }
-    if(ok) return hi;
-  }
-  return 0;
-}
-function evaluate7(cards){
+/* bot avatars = emoji (rendered as text in avatar circle) */
+const BOT_EMOJI = ["🤖","🦊","🐺","🐯","🦁","🐸","🦉","🦈","🐵","🐼"];
+
+/* =========================
+   EVALUATION (best 5 from 7)
+========================= */
+function eval5(cards){
+  // returns {cat, tiebreak[]} like classic
   const ranks = cards.map(c=>RVAL[c.r]).sort((a,b)=>b-a);
-  const suitMap = new Map();
+  const suits = cards.map(c=>c.s);
   const countMap = new Map();
-  for(const c of cards){
-    suitMap.set(c.s, (suitMap.get(c.s)||0)+1);
-    const v = RVAL[c.r];
-    countMap.set(v, (countMap.get(v)||0)+1);
-  }
+  for(const r of ranks) countMap.set(r, (countMap.get(r)||0)+1);
+
+  const isFlush = suits.every(s=>s===suits[0]);
   const unique = [...new Set(ranks)].sort((a,b)=>b-a);
 
-  let flushSuit = null;
-  for(const [s,c] of suitMap.entries()){
-    if(c>=5){ flushSuit = s; break; }
-  }
-  let flushRanks = null;
-  if(flushSuit){
-    flushRanks = cards.filter(c=>c.s===flushSuit).map(c=>RVAL[c.r]).sort((a,b)=>b-a);
-  }
-  if(flushRanks){
-    const uniqFlush = [...new Set(flushRanks)].sort((a,b)=>b-a);
-    const sf = straightHigh(uniqFlush);
-    if(sf) return { cat: 8, tiebreak: [sf] };
-  }
+  const straightHigh = (arrDesc)=>{
+    const set = new Set(arrDesc);
+    if(set.has(14)&&set.has(5)&&set.has(4)&&set.has(3)&&set.has(2)) return 5;
+    for(let hi=14;hi>=5;hi--){
+      let ok=true;
+      for(let d=0;d<5;d++) if(!set.has(hi-d)) { ok=false; break; }
+      if(ok) return hi;
+    }
+    return 0;
+  };
+
+  const st = straightHigh(unique);
+
+  if(isFlush && st) return {cat:8, tiebreak:[st]}; // straight flush
 
   const groups = [...countMap.entries()].map(([r,c])=>({r,c}))
     .sort((a,b)=>(b.c-a.c)||(b.r-a.r));
-  const fours = groups.filter(g=>g.c===4).map(g=>g.r);
-  const threes = groups.filter(g=>g.c===3).map(g=>g.r);
-  const pairs  = groups.filter(g=>g.c===2).map(g=>g.r);
+  const counts = groups.map(g=>g.c);
 
-  if(fours.length){
-    const quad = Math.max(...fours);
-    const kicker = unique.find(r=>r!==quad);
-    return { cat: 7, tiebreak: [quad, kicker] };
+  if(counts[0]===4){
+    const quad = groups[0].r;
+    const kicker = unique.find(x=>x!==quad);
+    return {cat:7, tiebreak:[quad,kicker]};
   }
-  if(threes.length){
-    const trip = Math.max(...threes);
-    const remainingTrips = threes.filter(r=>r!==trip);
-    const bestPair = pairs.length ? Math.max(...pairs) : (remainingTrips.length ? Math.max(...remainingTrips) : 0);
-    if(bestPair) return { cat: 6, tiebreak: [trip, bestPair] };
+  if(counts[0]===3 && counts[1]===2){
+    return {cat:6, tiebreak:[groups[0].r, groups[1].r]};
   }
-  if(flushRanks) return { cat: 5, tiebreak: flushRanks.slice(0,5) };
-  const st = straightHigh(unique);
-  if(st) return { cat: 4, tiebreak: [st] };
-  if(threes.length){
-    const trip = Math.max(...threes);
-    const kickers = unique.filter(r=>r!==trip).slice(0,2);
-    return { cat: 3, tiebreak: [trip, ...kickers] };
+  if(isFlush) return {cat:5, tiebreak:ranks};
+  if(st) return {cat:4, tiebreak:[st]};
+  if(counts[0]===3){
+    const trip = groups[0].r;
+    const kick = unique.filter(x=>x!==trip);
+    return {cat:3, tiebreak:[trip, kick[0], kick[1]]};
   }
-  if(pairs.length >= 2){
-    const sortedPairs = [...pairs].sort((a,b)=>b-a);
-    const p1 = sortedPairs[0], p2 = sortedPairs[1];
-    const kicker = unique.find(r=>r!==p1 && r!==p2);
-    return { cat: 2, tiebreak: [p1, p2, kicker] };
+  if(counts[0]===2 && counts[1]===2){
+    const p1 = groups[0].r, p2 = groups[1].r;
+    const kicker = unique.find(x=>x!==p1 && x!==p2);
+    return {cat:2, tiebreak:[Math.max(p1,p2), Math.min(p1,p2), kicker]};
   }
-  if(pairs.length === 1){
-    const p = pairs[0];
-    const kickers = unique.filter(r=>r!==p).slice(0,3);
-    return { cat: 1, tiebreak: [p, ...kickers] };
+  if(counts[0]===2){
+    const p = groups[0].r;
+    const kick = unique.filter(x=>x!==p);
+    return {cat:1, tiebreak:[p, kick[0], kick[1], kick[2]]};
   }
-  return { cat: 0, tiebreak: unique.slice(0,5) };
+  return {cat:0, tiebreak:ranks};
 }
 function compareEval(a,b){
-  if(a.cat !== b.cat) return a.cat - b.cat;
+  if(a.cat!==b.cat) return a.cat-b.cat;
   for(let i=0;i<Math.max(a.tiebreak.length,b.tiebreak.length);i++){
     const x=a.tiebreak[i]||0, y=b.tiebreak[i]||0;
     if(x!==y) return x-y;
@@ -784,70 +1014,111 @@ function compareEval(a,b){
   return 0;
 }
 function catName(cat){
-  return ["High","Pair","Two Pair","Trips","Straight","Flush","Full House","Quads","Straight Flush"][cat] || "Unknown";
+  return ["High Card","Pair","Two Pair","Trips","Straight","Flush","Full House","Quads","Straight Flush"][cat] || "—";
 }
 
-/* ========= Tournament ========= */
-function clearTournament(){
-  players = [];
-  deck = [];
-  board = [];
-  pot = 0;
-  stage = "IDLE";
-  dealer = 0; sb = 1; bb = 2;
-  current = 0; toCall = 0; raisesThisRound = 0;
-  awaitingHuman = false;
-  tournamentStarted = false;
-  handInProgress = false;
-}
-function createTournament(){
-  players = [];
-  players.push({name:nick, isBot:false, chips:walletChips, bet:0, folded:false, out:false, hand:[]});
-  for(let i=1;i<=BOT_COUNT;i++){
-    players.push({name:`BOT${i}`, isBot:true, chips:walletChips, bet:0, folded:false, out:false, hand:[]});
+function best5of7(seven){
+  // brute force choose 5 from 7 (21 combos)
+  let best = null;
+  let bestCards = null;
+  for(let a=0;a<7;a++){
+    for(let b=a+1;b<7;b++){
+      const five = [];
+      for(let i=0;i<7;i++){
+        if(i!==a && i!==b) five.push(seven[i]);
+      }
+      const e = eval5(five);
+      if(!best || compareEval(best, e) < 0){
+        best = e;
+        bestCards = five;
+      }
+    }
   }
-  dealer = 0; sb = 1; bb = 2;
-  stage = "IDLE";
-  pot = 0;
-  board = [];
-  toCall = 0; raisesThisRound = 0;
-  awaitingHuman = false;
-  tournamentStarted = true;
-  handInProgress = false;
-  elMsg.textContent = "Турнир создан. Жми Next Hand.";
-  saveAll();
-  render();
-  tick();
+  return {e:best, cards:bestCards};
 }
 
-function cleanupEliminations(){
+/* =========================
+   ODDS (Monte Carlo)
+   - uses known bot hole cards (local game)
+========================= */
+function computeWinOddsForYou(){
+  const you = players[0];
+  if(!handInProgress || you.out || you.folded) return null;
+  const actives = players.filter(p=>!p.out && !p.folded);
+  if(actives.length <= 1) return 100;
+
+  // Build remaining deck (remove known hole + board)
+  const used = new Set();
   for(const p of players){
-    if(!p.out && p.chips <= 0){
-      p.out = true;
-      p.chips = 0;
+    for(const c of p.hand||[]) if(c) used.add(cardKey(c));
+  }
+  for(const c of board) if(c) used.add(cardKey(c));
+
+  const full = [];
+  for(const s of SUITS) for(const r of RANKS){
+    const k = r+s;
+    if(!used.has(k)) full.push({r,s});
+  }
+
+  let wins = 0, ties = 0, total = 0;
+  const needBoard = 5 - board.length;
+
+  for(let it=0; it<ODDS_ITERS; it++){
+    // sample remaining cards
+    // shuffle pick
+    const pool = full.slice();
+    for(let i=pool.length-1;i>0;i--){
+      const j = (Math.random()*(i+1))|0;
+      [pool[i],pool[j]] = [pool[j],pool[i]];
+    }
+    const runout = pool.slice(0, needBoard);
+    const finalBoard = board.concat(runout);
+
+    const youBest = best5of7(you.hand.concat(finalBoard)).e;
+
+    let bestE = youBest;
+    let bestCount = 1;
+    let youIsBest = true;
+
+    for(const p of actives){
+      if(p===you) continue;
+      const e = best5of7(p.hand.concat(finalBoard)).e;
+      const cmp = compareEval(bestE, e);
+      if(cmp < 0){
+        bestE = e;
+        bestCount = 1;
+        youIsBest = false;
+      } else if(cmp === 0){
+        bestCount++;
+        if(compareEval(e, youBest)===0) {
+          // tie for best includes you
+          // keep youIsBest as is
+        } else {
+          youIsBest = false;
+        }
+      }
+    }
+
+    total++;
+    if(compareEval(bestE, youBest)===0){
+      // you is at least tied best
+      // count if someone else shares best
+      const tieN = actives.filter(p=>{
+        const e = best5of7(p.hand.concat(finalBoard)).e;
+        return compareEval(e, bestE)===0;
+      }).length;
+      if(tieN === 1) wins++;
+      else ties++;
     }
   }
-}
-function checkTournamentWinner(){
-  const alive = players.filter(p=>!p.out);
-  if(alive.length === 1){
-    const w = alive[0];
-    elMsg.textContent = `🏆 CHAMPION: ${w.name}!` + (w.name===nick ? " +10 EUR" : "");
-    if(w.name === nick){
-      walletEUR += 10;
-      chipFly("+10 EUR");
-    }
-    handInProgress = false;
-    stage = "IDLE";
-    awaitingHuman = false;
-    saveAll();
-    renderHUD();
-    updateButtons();
-    return true;
-  }
-  return false;
+
+  const pct = ((wins + ties*0.5) / Math.max(1,total)) * 100;
+  return Math.round(pct);
 }
 
+/* =========================
+   GAME FLOW
+========================= */
 function resetRoundBets(){
   for(const p of players) p.bet = 0;
   toCall = 0;
@@ -859,7 +1130,7 @@ function postBlind(i, amount){
   p.chips -= pay;
   p.bet += pay;
   pot += pay;
-  if(pay>0) chipFly(`-${pay}`);
+  if(pay>0){ chipFly(`-${pay}`); SFX.chip(); }
 }
 function bettingRoundComplete(){
   const ps = inHandPlayers();
@@ -871,16 +1142,76 @@ function bettingRoundComplete(){
 }
 function minRaiseTo(){ return toCall + BIG_BLIND; }
 
-function startHand(){
-  if(!tournamentStarted) return;
-  cleanupEliminations();
+function cleanupEliminations(){
+  for(const p of players){
+    if(!p.out && p.chips <= 0){
+      p.out = true;
+      p.chips = 0;
+    }
+  }
+}
+function checkTournamentWinner(){
+  const alive = alivePlayers();
+  if(alive.length === 1){
+    const w = alive[0];
+    elMsg.textContent = `🏆 CHAMPION: ${w.name}` + (w.isBot ? "" : "  +10 EUR");
+    if(!w.isBot){
+      walletEUR += 10;
+      chipFly("+10 EUR");
+      SFX.win();
+      saveAll();
+      renderHUD();
+    }
+    handInProgress = false;
+    stage = "IDLE";
+    awaitingHuman = false;
+    stopTurnTimer();
+    return true;
+  }
+  return false;
+}
+
+function createTournamentIfNeeded(){
+  if(players.length && players[0] && players[0].name === nick) return;
+
+  players = [];
+  players.push({
+    name:nick, isBot:false,
+    chips:walletChips, bet:0,
+    folded:false, out:false,
+    hand:[],
+    avatar: settingAvatarDataURL
+  });
+  for(let i=1;i<=BOT_COUNT;i++){
+    players.push({
+      name:`BOT${i}`, isBot:true,
+      chips:walletChips, bet:0,
+      folded:false, out:false,
+      hand:[],
+      avatar: BOT_EMOJI[(i-1)%BOT_EMOJI.length]
+    });
+  }
+  dealer = 0; sb = 1; bb = 2;
+  stage = "IDLE";
+  pot = 0;
+  board = [];
+  toCall = 0; raisesThisRound = 0;
+  handInProgress = false;
+  awaitingHuman = false;
+  saveAll();
+}
+
+function startHandAuto(){
   if(checkTournamentWinner()) return;
-  if(players.filter(p=>!p.out).length < 2) return;
+  cleanupEliminations();
+  if(alivePlayers().length < 2) return;
 
   handInProgress = true;
   deck = newDeck();
   board = [];
   pot = 0;
+  bestHandForYou = null;
+  winPctForYou = null;
 
   for(const p of players){
     p.folded = false; p.bet = 0; p.hand = [];
@@ -890,9 +1221,15 @@ function startHand(){
   sb = nextNotOutIndex(dealer);
   bb = nextNotOutIndex(sb);
 
+  // deal with tiny sound
   for(let r=0;r<2;r++){
-    for(const p of players) if(!p.out) p.hand.push(deck.pop());
+    for(const p of players){
+      if(!p.out){
+        p.hand.push(deck.pop());
+      }
+    }
   }
+  SFX.deal();
 
   resetRoundBets();
   postBlind(sb, SMALL_BLIND);
@@ -903,73 +1240,66 @@ function startHand(){
   current = nextActiveIndex(bb);
   awaitingHuman = false;
 
-  elMsg.textContent = "Раздача началась.";
+  elMsg.textContent = "Новая раздача…";
   saveAll();
   render();
   tick();
 }
 
-function pauseThen(fn, text){
-  clearTimeout(transitionTimer);
+function pauseStreet(text, fn){
+  clearTimeout(streetTimer);
   elMsg.textContent = text;
-  updateButtons();
-  transitionTimer = setTimeout(()=>{ fn(); }, STREET_PAUSE_MS);
+  streetTimer = setTimeout(()=>fn(), STREET_PAUSE_MS);
 }
 
 function advanceStage(){
-  // pause BEFORE revealing next street
-  const nextText =
+  stopTurnTimer();
+  pauseStreet(
     stage==="PREFLOP" ? "Флоп…" :
     stage==="FLOP" ? "Тёрн…" :
     stage==="TURN" ? "Ривер…" :
-    stage==="RIVER" ? "Шоудаун…" : "…";
+    stage==="RIVER" ? "Шоудаун…" : "…",
+    ()=>{
+      for(const p of players) p.bet = 0;
+      toCall = 0;
+      raisesThisRound = 0;
 
-  pauseThen(()=>{
-    for(const p of players) p.bet = 0;
-    toCall = 0;
-    raisesThisRound = 0;
+      if(stage==="PREFLOP"){ board.push(deck.pop(), deck.pop(), deck.pop()); stage="FLOP"; SFX.deal(); }
+      else if(stage==="FLOP"){ board.push(deck.pop()); stage="TURN"; SFX.deal(); }
+      else if(stage==="TURN"){ board.push(deck.pop()); stage="RIVER"; SFX.deal(); }
+      else if(stage==="RIVER"){ stage="SHOWDOWN"; }
 
-    if(stage==="PREFLOP"){
-      board.push(deck.pop(), deck.pop(), deck.pop());
-      stage="FLOP";
-    } else if(stage==="FLOP"){
-      board.push(deck.pop());
-      stage="TURN";
-    } else if(stage==="TURN"){
-      board.push(deck.pop());
-      stage="RIVER";
-    } else if(stage==="RIVER"){
-      stage="SHOWDOWN";
+      current = nextActiveIndex(dealer);
+      awaitingHuman = false;
+
+      saveAll();
+      render();
+
+      if(stage==="SHOWDOWN"){
+        pauseStreet("Открываем карты…", doShowdown);
+      } else {
+        tick();
+      }
     }
-
-    current = nextActiveIndex(dealer);
-    awaitingHuman = false;
-
-    saveAll();
-    render();
-
-    if(stage==="SHOWDOWN"){
-      pauseThen(doShowdown, "Открываем карты…");
-      return;
-    }
-
-    tick();
-  }, nextText);
+  );
 }
 
 function doShowdown(){
+  stopTurnTimer();
+
   const contenders = inHandPlayers();
   if(contenders.length === 1){
     awardPotTo(players.indexOf(contenders[0]), "(everyone folded)");
     return;
   }
 
-  const evals = contenders.map(p=>({p, e:evaluate7([...p.hand, ...board])}));
-  evals.sort((a,b)=>compareEval(a.e,b.e));
-  const best = evals[evals.length-1].e;
-  const winners = evals.filter(x=>compareEval(x.e,best)===0).map(x=>x.p);
-
-  elMsg.textContent = `Лучшее: ${catName(best.cat)} | Победитель: ${winners.map(w=>w.name).join(", ")}`;
+  const evals = contenders.map(p=>({
+    p,
+    best: best5of7(p.hand.concat(board))
+  }));
+  evals.sort((a,b)=>compareEval(a.best.e, b.best.e));
+  const bestE = evals[evals.length-1].best.e;
+  const winners = evals.filter(x=>compareEval(x.best.e, bestE)===0).map(x=>x.p);
 
   const share = Math.floor(pot / winners.length);
   let rem = pot - share*winners.length;
@@ -977,22 +1307,35 @@ function doShowdown(){
     w.chips += share;
     if(rem>0){ w.chips += 1; rem--; }
   }
+
+  elMsg.textContent = `Showdown: ${winners.map(w=>w.name).join(", ")} wins`;
   chipFly(`+${pot}`);
+  SFX.chip();
   pot = 0;
 
   handInProgress = false;
   stage = "IDLE";
   awaitingHuman = false;
+
   cleanupEliminations();
   checkTournamentWinner();
+
+  // auto next hand
   saveAll();
   render();
-  tick();
+  scheduleNextHand();
+}
+
+function scheduleNextHand(){
+  clearTimeout(nextHandTimer);
+  if(checkTournamentWinner()) return;
+  nextHandTimer = setTimeout(()=>startHandAuto(), AUTO_NEXT_HAND_MS);
 }
 
 function awardPotTo(idx, reason){
   players[idx].chips += pot;
   chipFly(`+${pot}`);
+  SFX.chip();
   elMsg.textContent = `${players[idx].name} wins ${pot} ${reason||""}`.trim();
   pot = 0;
 
@@ -1002,14 +1345,16 @@ function awardPotTo(idx, reason){
 
   cleanupEliminations();
   checkTournamentWinner();
+
   saveAll();
   render();
-  tick();
+  scheduleNextHand();
 }
 
 function playerFold(i){
   players[i].folded = true;
   elMsg.textContent = `${players[i].name} folds`;
+  stopTurnTimer();
   saveAll();
   render();
   if(onlyOneLeftInHand()){
@@ -1021,14 +1366,14 @@ function playerFold(i){
 }
 
 function playerCheck(i){
-  // only allowed if need==0
   const p = players[i];
   const need = Math.max(0, toCall - p.bet);
   if(need !== 0) return;
   elMsg.textContent = `${p.name} checks`;
-  current = nextActiveIndex(i);
+  stopTurnTimer();
   saveAll();
   render();
+  current = nextActiveIndex(i);
   if(bettingRoundComplete()) return advanceStage();
   tick();
 }
@@ -1036,12 +1381,14 @@ function playerCheck(i){
 function playerCall(i){
   const p = players[i];
   const need = Math.max(0, toCall - p.bet);
+  if(need<=0) return playerCheck(i);
   const pay = Math.min(need, p.chips);
   p.chips -= pay;
   p.bet += pay;
   pot += pay;
-  if(pay>0) chipFly(`-${pay}`);
+  if(pay>0){ chipFly(`-${pay}`); SFX.chip(); }
   elMsg.textContent = `${p.name} calls ${pay}`;
+  stopTurnTimer();
   saveAll();
   render();
   current = nextActiveIndex(i);
@@ -1067,7 +1414,9 @@ function playerRaiseTo(i, raiseTo){
   raisesThisRound++;
 
   chipFly(`-${pay}`);
+  SFX.chip();
   elMsg.textContent = `${p.name} raises to ${p.bet}`;
+  stopTurnTimer();
   saveAll();
   render();
 
@@ -1075,7 +1424,9 @@ function playerRaiseTo(i, raiseTo){
   tick();
 }
 
-/* ========= Bots ========= */
+/* =========================
+   BOT AI (simple but ok)
+========================= */
 function botDecision(i){
   const p = players[i];
   const need = Math.max(0, toCall - p.bet);
@@ -1107,11 +1458,11 @@ function botDecision(i){
     return "CALL";
   }
 
-  const e = evaluate7([...p.hand, ...board]);
+  const e = best5of7(p.hand.concat(board)).e;
   let strength = (e.cat/8) + (Math.random()-0.5)*0.08;
 
   if(need===0){
-    if(strength > 0.62 && raisesThisRound<MAX_RAISES_PER_ROUND && Math.random()<0.30) return "RAISE";
+    if(strength > 0.62 && raisesThisRound<MAX_RAISES_PER_ROUND && Math.random()<0.28) return "RAISE";
     return "CHECK";
   }
   if(strength < 0.25 && (pressure>0.14 || potOdds>0.30) && Math.random()<0.80) return "FOLD";
@@ -1124,7 +1475,6 @@ function botDecision(i){
 function botAct(){
   if(!handInProgress) return;
   if(players[current].out || players[current].folded) current = nextActiveIndex(current);
-
   if(onlyOneLeftInHand()) return awardPotTo(players.indexOf(inHandPlayers()[0]), "(everyone folded)");
 
   const d = botDecision(current);
@@ -1135,11 +1485,9 @@ function botAct(){
     const min = minRaiseTo();
     const maxTo = p.bet + p.chips;
     let target = min + Math.floor(Math.random()*3)*BIG_BLIND;
-    if(stage!=="PREFLOP"){
-      const e = evaluate7([...p.hand,...board]);
-      if(e.cat>=4) target += BIG_BLIND*3;
-      if(e.cat>=6) target += BIG_BLIND*5;
-    }
+    const e = best5of7(p.hand.concat(board)).e;
+    if(e.cat>=4) target += BIG_BLIND*3;
+    if(e.cat>=6) target += BIG_BLIND*5;
     target = clamp(target, min, maxTo);
     playerRaiseTo(current, target);
   } else {
@@ -1147,46 +1495,58 @@ function botAct(){
   }
 }
 
-/* ========= Tick ========= */
-function tick(){
-  clearTimeout(botTimer);
-
-  if(view !== "TOURNAMENT"){
-    updateButtons();
-    updateRaiseLimitsTop();
-    return;
-  }
-
-  cleanupEliminations();
-  if(checkTournamentWinner()) return;
-
-  if(!handInProgress || stage==="IDLE" || stage==="SHOWDOWN"){
-    awaitingHuman = false;
-    updateButtons();
-    updateRaiseLimitsTop();
-    return;
-  }
-
-  if(players[current].out || players[current].folded){
-    current = nextActiveIndex(current);
-  }
-
-  if(!players[current].isBot){
-    awaitingHuman = true;
-    updateButtons();
-    updateRaiseLimitsTop();
-    return;
-  }
-
-  awaitingHuman = false;
-  updateButtons();
-  updateRaiseLimitsTop();
-
-  elMsg.textContent = "Бот думает…";
-  botTimer = setTimeout(()=>botAct(), BOT_THINK_MS);
+/* =========================
+   TURN TIMER (15s default, configurable)
+========================= */
+function stopTurnTimer(){
+  clearInterval(turnTimer);
+  turnTimer = null;
+  turnDeadline = 0;
+  turnLeft.textContent = "0";
+  timerBar.style.transform = "scaleX(0)";
 }
 
-/* ========= Render ========= */
+function startTurnTimer(){
+  stopTurnTimer();
+  const secs = settingTurnSec;
+  const start = Date.now();
+  turnDeadline = start + secs*1000;
+
+  const tickUi = ()=>{
+    const now = Date.now();
+    const leftMs = Math.max(0, turnDeadline - now);
+    const left = Math.ceil(leftMs/1000);
+    turnLeft.textContent = String(left);
+    const t = Math.max(0, Math.min(1, leftMs/(secs*1000)));
+    timerBar.style.transform = `scaleX(${t})`;
+
+    if(leftMs <= 0){
+      // auto-action
+      stopTurnTimer();
+      autoActionOnTimeout();
+    }
+  };
+  tickUi();
+  turnTimer = setInterval(tickUi, 120);
+}
+
+function autoActionOnTimeout(){
+  // If your turn: auto-check if possible else auto-fold
+  if(!handInProgress || current!==0 || players[0].folded || players[0].out) return;
+  const you = players[0];
+  const need = Math.max(0, toCall - you.bet);
+  if(need===0){
+    elMsg.textContent = "⏱️ Time out → auto CHECK";
+    playerCheck(0);
+  } else {
+    elMsg.textContent = "⏱️ Time out → auto FOLD";
+    playerFold(0);
+  }
+}
+
+/* =========================
+   UI + RENDER
+========================= */
 function renderHUD(){
   hudNick.textContent = nick ?? "-";
   hudEur.textContent = String(walletEUR);
@@ -1194,410 +1554,34 @@ function renderHUD(){
   hudStage.textContent = stage;
   hudPot.textContent = String(pot);
   hudToCall.textContent = String(toCall);
-  hudDealer.textContent = (tournamentStarted && players[dealer]) ? players[dealer].name : "-";
+  hudDealer.textContent = (players[dealer] ? players[dealer].name : "-");
+  potChipsLabel.textContent = String(pot);
+  renderStack(potStack, pot);
+
+  const you = players[0];
+  youChipsLabel.textContent = you ? String(you.chips) : "0";
+  renderStack(youStack, you ? you.chips : 0);
 }
 
-function makeCardEl(text, hidden, animate){
+function makeAvatarEl(avatarVal){
   const el = document.createElement("div");
-  el.className = "card" + (hidden ? " hidden" : "") + (animate ? " deal" : "");
-  if(hidden){ el.textContent = "🂠"; return el; }
-  if(!text){ el.style.opacity="0.35"; el.textContent="—"; return el; }
-  const r = text.slice(0,1), s = text.slice(1);
-  const small = document.createElement("small"); small.textContent = r;
-  const suit = document.createElement("div"); suit.className="suit"; suit.textContent = s;
-  el.appendChild(small); el.appendChild(suit);
+  el.className = "avatar";
+  if(!avatarVal){
+    el.textContent = "🙂";
+    return el;
+  }
+  // if starts with "data:" it's image
+  if(typeof avatarVal === "string" && avatarVal.startsWith("data:")){
+    const img = document.createElement("img");
+    img.src = avatarVal;
+    el.appendChild(img);
+    return el;
+  }
+  // else emoji
+  el.textContent = avatarVal;
   return el;
 }
 
-function render(){
-  // remove seats
-  [...elTable.querySelectorAll(".seat")].forEach(n=>n.remove());
-
-  // board
-  elBoard.innerHTML = "";
-  for(let i=0;i<5;i++){
-    const c = board[i];
-    elBoard.appendChild(makeCardEl(c ? (c.r+c.s) : "", !c, !!c));
-  }
-
-  renderHUD();
-
-  const seatPos = ["pos-0","pos-1","pos-2","pos-3","pos-4","pos-5"];
-  for(let i=0;i<players.length;i++){
-    const p = players[i];
-    const seat = document.createElement("div");
-    seat.className = `seat ${seatPos[i]||"pos-5"}`;
-
-    const top = document.createElement("div");
-    top.className="top";
-
-    const nm = document.createElement("div");
-    nm.className="name"; nm.textContent = p.name;
-
-    const tag = document.createElement("div");
-    tag.className="tag";
-    if(p.out){ tag.classList.add("out"); tag.textContent="OUT"; }
-    else if(handInProgress && i===current && !p.folded){ tag.classList.add("turn"); tag.textContent="TURN"; }
-    else tag.textContent = p.isBot ? "BOT" : "YOU";
-
-    top.appendChild(nm); top.appendChild(tag);
-
-    const meta = document.createElement("div");
-    meta.className="meta";
-    meta.innerHTML = `<span>chips: <b>${p.chips}</b></span><span>${p.folded ? "<span style='color:var(--danger)'>folded</span>" : ""}</span>`;
-
-    const cards = document.createElement("div");
-    cards.className="cards" + ((i===0 && p.folded) ? " folded" : "");
-
-    const hidden = p.isBot && handInProgress && stage!=="SHOWDOWN";
-    const show = !p.isBot || stage==="SHOWDOWN" || !handInProgress;
-    const c1 = p.hand?.[0], c2 = p.hand?.[1];
-    cards.appendChild(makeCardEl(c1 ? (c1.r+c1.s) : "", hidden || !show, !!c1));
-    cards.appendChild(makeCardEl(c2 ? (c2.r+c2.s) : "", hidden || !show, !!c2));
-
-    const bet = document.createElement("div");
-    bet.className="bet";
-    bet.textContent = p.out ? "" : (p.bet>0 ? `Bet: ${p.bet}` : "");
-
-    seat.appendChild(top);
-    seat.appendChild(meta);
-    seat.appendChild(cards);
-    seat.appendChild(bet);
-
-    elTable.appendChild(seat);
-  }
-
-  updateButtons();
-  updateRaiseLimitsTop();
-}
-
-function updateButtons(){
-  const inT = (view === "TOURNAMENT");
-  btnStartResume.disabled = !nick;
-  btnNextHand.disabled = !(inT && tournamentStarted && !handInProgress && players.filter(p=>!p.out).length>=2);
-
-  const yourTurn = inT && tournamentStarted && handInProgress && awaitingHuman && current===0 && !players[0].out && !players[0].folded;
-  const you = players[0];
-
-  btnFold.disabled = !yourTurn;
-
-  // separate check/call
-  let need = 0;
-  if(you && handInProgress) need = Math.max(0, toCall - you.bet);
-
-  btnCheck.disabled = !(yourTurn && need===0);
-  btnCall.disabled  = !(yourTurn && need>0);
-
-  btnRaise.disabled = !(yourTurn && raisesThisRound < MAX_RAISES_PER_ROUND);
-}
-
-function updateRaiseLimitsTop(){
-  const you = players[0];
-  if(!you || !handInProgress || view!=="TOURNAMENT"){
-    raiseMinTop.textContent = "0";
-    raiseMaxTop.textContent = "0";
-    return;
-  }
-  const minTo = clamp(minRaiseTo(), 0, you.bet + you.chips);
-  const maxTo = you.bet + you.chips;
-  raiseMinTop.textContent = String(minTo);
-  raiseMaxTop.textContent = String(maxTo);
-}
-
-/* ========= Views / Menu ========= */
-function openMenu(){ show(menuOverlay,true); }
-function closeMenu(){ show(menuOverlay,false); }
-
-function openShop(){
-  view="SHOP";
-  shopEur.textContent = String(walletEUR);
-  shopChips.textContent = String(walletChips);
-  show(shopOverlay,true);
-  show(playOverlay,false);
-  closeMenu();
-  tick();
-}
-function closeShop(){
-  show(shopOverlay,false);
-  if(view==="SHOP") view="TOURNAMENT";
-  tick(); render();
-}
-function openPlay(){
-  view="PLAY";
-  buildLobby();
-  show(playOverlay,true);
-  show(shopOverlay,false);
-  closeMenu();
-  tick();
-}
-function closePlay(){
-  show(playOverlay,false);
-  if(view==="PLAY") view="TOURNAMENT";
-  tick(); render();
-}
-function goTournament(){
-  view="TOURNAMENT";
-  show(shopOverlay,false);
-  show(playOverlay,false);
-  closeMenu();
-  tick(); render();
-}
-
-/* ========= Lobby mock ========= */
-function randomNick(){
-  const a = ["neo","max","viper","fox","jazz","storm","ace","byte","wolf","kira","mike","zero","rex","iris","nova"];
-  const b = Math.floor(Math.random()*900)+100;
-  return a[Math.floor(Math.random()*a.length)] + b;
-}
-function buildLobby(){
-  lobby.innerHTML = "";
-  const tables = [
-    {name:"Table #1"}, {name:"Table #2"}, {name:"Table #3"}
-  ];
-  for(const t of tables){
-    const box = document.createElement("div");
-    box.className="tbl";
-    const head = document.createElement("div");
-    head.className="tbl-head";
-    head.innerHTML = `<b>${t.name}</b><span class="pill">Players online: <b>${Math.floor(Math.random()*6)+1}</b></span>`;
-    const seats = document.createElement("div");
-    seats.className="seats-mini";
-
-    const youSeat = document.createElement("span");
-    youSeat.className="seat-mini you";
-    youSeat.textContent = nick ? `${nick} (you)` : "you";
-    seats.appendChild(youSeat);
-
-    const count = Math.floor(Math.random()*5)+1;
-    for(let i=0;i<count;i++){
-      const s = document.createElement("span");
-      s.className="seat-mini";
-      s.textContent = randomNick();
-      seats.appendChild(s);
-    }
-
-    const join = document.createElement("button");
-    join.className="btn btn-accent";
-    join.textContent="Join (demo)";
-    join.onclick = ()=> alert("Это демо без сервера. Для реального онлайна нужен бэкенд (WebSocket/Firebase).");
-
-    box.appendChild(head);
-    box.appendChild(seats);
-    box.appendChild(join);
-    lobby.appendChild(box);
-  }
-}
-
-/* ========= Shop ========= */
-function buyChips(chips){
-  const price = SHOP_PRICES[chips];
-  if(walletEUR < price){
-    alert(`Не хватает EUR. Нужно ${price}, у тебя ${walletEUR}.`);
-    return;
-  }
-  walletEUR -= price;
-  walletChips += chips;
-  chipFly(`-${price} EUR`);
-  shopEur.textContent = String(walletEUR);
-  shopChips.textContent = String(walletChips);
-  renderHUD();
-  saveAll();
-}
-
-/* ========= Raise modal ========= */
-function openRaise(){
-  const you = players[0];
-  if(!you || !handInProgress) return;
-  const minTo = clamp(minRaiseTo(), 0, you.bet + you.chips);
-  const maxTo = you.bet + you.chips;
-
-  raiseSlider.min = String(minTo);
-  raiseSlider.max = String(maxTo);
-  raiseSlider.value = String(minTo);
-
-  raiseToLabel.textContent = String(minTo);
-  raiseInput.value = String(minTo);
-  raiseInput.min = String(minTo);
-  raiseInput.max = String(maxTo);
-
-  show(raiseOverlay,true);
-}
-function closeRaise(){ show(raiseOverlay,false); }
-function syncRaiseFromSlider(){
-  const v = Number(raiseSlider.value);
-  raiseToLabel.textContent = String(v);
-  raiseInput.value = String(v);
-}
-function syncRaiseFromInput(){
-  const you = players[0];
-  const minTo = clamp(minRaiseTo(), 0, you.bet + you.chips);
-  const maxTo = you.bet + you.chips;
-  let v = Number(raiseInput.value || minTo);
-  v = clamp(v, minTo, maxTo);
-  raiseInput.value = String(v);
-  raiseSlider.value = String(v);
-  raiseToLabel.textContent = String(v);
-}
-
-/* ========= Events ========= */
-btnMenu.addEventListener("click", openMenu);
-btnCloseMenu.addEventListener("click", closeMenu);
-
-btnGoTournament.addEventListener("click", goTournament);
-btnGoShop.addEventListener("click", openShop);
-btnGoPlay.addEventListener("click", openPlay);
-
-btnShop.addEventListener("click", openShop);
-btnShopBackMenu.addEventListener("click", ()=>{ closeShop(); openMenu(); });
-btnShopClose.addEventListener("click", closeShop);
-
-btnPlayBackMenu.addEventListener("click", ()=>{ closePlay(); openMenu(); });
-btnPlayClose.addEventListener("click", closePlay);
-
-shopOverlay.querySelectorAll("[data-buy]").forEach(b=>{
-  b.addEventListener("click", ()=> buyChips(Number(b.getAttribute("data-buy"))));
-});
-
-btnStartResume.addEventListener("click", ()=>{
-  if(!nick) return;
-  if(!tournamentStarted) createTournament();
-  render(); tick();
-});
-
-btnNextHand.addEventListener("click", startHand);
-
-btnFold.addEventListener("click", ()=>{
-  if(view==="TOURNAMENT" && awaitingHuman && current===0) { awaitingHuman=false; playerFold(0); }
-});
-btnCheck.addEventListener("click", ()=>{
-  if(view==="TOURNAMENT" && awaitingHuman && current===0) { awaitingHuman=false; playerCheck(0); }
-});
-btnCall.addEventListener("click", ()=>{
-  if(view==="TOURNAMENT" && awaitingHuman && current===0) { awaitingHuman=false; playerCall(0); }
-});
-btnRaise.addEventListener("click", ()=>{
-  if(view==="TOURNAMENT" && awaitingHuman && current===0) openRaise();
-});
-
-raiseSlider.addEventListener("input", syncRaiseFromSlider);
-raiseInput.addEventListener("input", syncRaiseFromInput);
-
-btnRaiseClose.addEventListener("click", closeRaise);
-btnRaiseConfirm.addEventListener("click", ()=>{
-  const v = Number(raiseSlider.value);
-  closeRaise();
-  if(view==="TOURNAMENT" && awaitingHuman && current===0){
-    awaitingHuman=false;
-    playerRaiseTo(0, v);
-  }
-});
-btnRaiseMin.addEventListener("click", ()=>{
-  raiseSlider.value = raiseSlider.min;
-  syncRaiseFromSlider();
-});
-btnRaiseAll.addEventListener("click", ()=>{
-  raiseSlider.value = raiseSlider.max;
-  syncRaiseFromSlider();
-});
-btnRaiseHalf.addEventListener("click", ()=>{
-  const you = players[0];
-  const maxTo = you.bet + you.chips;
-  const minTo = Number(raiseSlider.min);
-  const v = clamp(Math.floor((minTo + maxTo)/2), minTo, maxTo);
-  raiseSlider.value = String(v);
-  syncRaiseFromSlider();
-});
-
-/* ========= Nick (ask immediately) ========= */
-function openNick(){
-  show(nickOverlay,true);
-  nickInput.focus();
-}
-function closeNick(){ show(nickOverlay,false); }
-
-nickOk.addEventListener("click", ()=>{
-  const n = nickInput.value.trim();
-  if(!n){ nickInput.focus(); return; }
-  nick = n;
-  saveKey = keyForNick(nick);
-  ensureProfile();
-  closeNick();
-  elMsg.textContent = "Выбери режим в меню.";
-  render();
-  tick();
-  openMenu();
-});
-nickInput.addEventListener("keydown", (e)=>{ if(e.key==="Enter") nickOk.click(); });
-
-/* ========= Bot scheduling ========= */
-function botTick(){
-  clearTimeout(botTimer);
-  if(view!=="TOURNAMENT") return;
-  if(!handInProgress || stage==="IDLE" || stage==="SHOWDOWN") return;
-  if(players[current].out || players[current].folded) current = nextActiveIndex(current);
-
-  if(!players[current].isBot){
-    awaitingHuman = true;
-    updateButtons();
-    updateRaiseLimitsTop();
-    return;
-  }
-  awaitingHuman = false;
-  updateButtons();
-  updateRaiseLimitsTop();
-  elMsg.textContent = "Бот думает…";
-  botTimer = setTimeout(()=>botAct(), BOT_THINK_MS);
-}
-
-/* Replace tick with botTick + state checks */
-function tick(){
-  clearTimeout(botTimer);
-  if(view!=="TOURNAMENT"){
-    updateButtons(); updateRaiseLimitsTop(); return;
-  }
-  cleanupEliminations();
-  if(checkTournamentWinner()) return;
-
-  if(!handInProgress || stage==="IDLE" || stage==="SHOWDOWN"){
-    awaitingHuman = false;
-    updateButtons(); updateRaiseLimitsTop(); return;
-  }
-  botTick();
-}
-
-/* ========= Boot ========= */
-function boot(){
-  // ask immediately
-  const last = localStorage.getItem("poker_last_nick");
-  openNick();
-  if(last){
-    nickInput.value = last;
-    nickInput.select();
-  }
-  elMsg.textContent = "";
-  renderHUD();
-  render();
-  updateButtons();
-  updateRaiseLimitsTop();
-}
-boot();
-
-/* ========= Render safe call (initial no players) ========= */
-function safeInit(){
-  if(players.length===0){
-    // minimal placeholders so render doesn't crash before tournament created
-    players = [
-      {name:"YOU", isBot:false, chips:0, bet:0, folded:false, out:false, hand:[]},
-      {name:"BOT1", isBot:true, chips:0, bet:0, folded:false, out:false, hand:[]},
-      {name:"BOT2", isBot:true, chips:0, bet:0, folded:false, out:false, hand:[]},
-      {name:"BOT3", isBot:true, chips:0, bet:0, folded:false, out:false, hand:[]},
-      {name:"BOT4", isBot:true, chips:0, bet:0, folded:false, out:false, hand:[]},
-      {name:"BOT5", isBot:true, chips:0, bet:0, folded:false, out:false, hand:[]},
-    ];
-    render();
-  }
-}
-safeInit();
-</script>
-</body>
-</html>
+function makeCardEl(c, opts){
+  const {hidden=false, animate=false, neon=false} = opts || {};
+  const el = document.createElement("
