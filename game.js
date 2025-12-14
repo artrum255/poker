@@ -1,11 +1,12 @@
-/* Poker Tournament v3.1
-   FIX:
-   - Resume always starts/continues (no pending flags)
-   - Pause freezes everything
+/* Poker Tournament v3.1a
+   FIX (Resume deals every time):
+   - Resume ALWAYS initializes tournament (ensureTournament)
+   - Tick auto-starts a hand when RUNNING + IDLE (no more “stuck after Resume”)
+   - Pause freezes everything (timers cleared)
    - Correct streets: flop(3) -> turn(1) -> river(1)
-   - Win% MC vs remaining opponents only, bots unknown
+   - Win% MC vs remaining opponents only (bots unknown)
    - Neon highlight best 5 + hand name + win%
-   - New storage key v31 to avoid old saves
+   - Storage key v31 to avoid old saves
 */
 
 const START_CHIPS = 1000;
@@ -397,8 +398,9 @@ function onTurnTimeout(){
 /* ---------- Tournament ---------- */
 function ensureTournament(){
   if(tournamentStarted && players.length) return;
+
   players=[];
-  players.push({name:nick,isBot:false,chips:START_CHIPS,bet:0,folded:false,out:false,acted:false,hand:[]});
+  players.push({name:nick||"YOU",isBot:false,chips:START_CHIPS,bet:0,folded:false,out:false,acted:false,hand:[]});
   for(let i=1;i<=BOT_COUNT;i++){
     players.push({name:`BOT${i}`,isBot:true,chips:START_CHIPS,bet:0,folded:false,out:false,acted:false,hand:[]});
   }
@@ -433,6 +435,8 @@ function postBlind(i, amount){
 function startHandAuto(){
   if(menuOpen || paused) return;
 
+  ensureTournament();
+
   cleanupElims();
   const w=tournamentWinner();
   if(w){
@@ -447,7 +451,7 @@ function startHandAuto(){
       dealer=0; stage="IDLE"; pot=0; board=[]; toCall=0; raisesThisRound=0;
       handInProgress=false;
       render();
-      startHandAuto();
+      if(!paused && !menuOpen) startHandAuto();
     },2000);
     return;
   }
@@ -469,7 +473,6 @@ function startHandAuto(){
     for(const p of players) if(!p.out) p.hand.push(deck.pop());
   }
 
-  // reset round
   for(const p of players) p.bet=0;
   toCall=0; raisesThisRound=0;
   resetActedFlags();
@@ -504,7 +507,6 @@ function advanceStage(){
     stage==="TURN"   ? "Ривер…" : "Шоудаун…";
 
   pauseThen(()=>{
-    // reset bets for new street
     for(const p of players) p.bet=0;
     toCall=0; raisesThisRound=0;
     resetActedFlags();
@@ -913,15 +915,14 @@ function buildMenuControls(){
   const resumeBtn=document.createElement("button");
   resumeBtn.className="btn accent";
   resumeBtn.textContent="Resume";
-  resumeBtn.onclick=()=>{
-    resumeGame();
-  };
+  resumeBtn.onclick=()=>{ resumeGame(); };
 
   const newBtn=document.createElement("button");
   newBtn.className="btn danger";
   newBtn.textContent="New Tournament";
   newBtn.onclick=()=>{
     if(!confirm("Сбросить турнир и начать заново?")) return;
+    ensureTournament();
     players.forEach(p=>{
       p.out=false; p.folded=false; p.bet=0; p.hand=[]; p.acted=false;
       p.chips=START_CHIPS;
@@ -981,19 +982,24 @@ function closeMenu(){
   tick();
 }
 
+/* ✅ MAIN FIX: Resume ALWAYS starts dealing */
 function resumeGame(){
-  // THE FIX: Resume always does something
   paused=false;
   stopAllTimers();
   show(menuOverlay,false);
   menuOpen=false;
 
-  // If no hand running -> start a new one
+  // guarantee tournament state is valid
+  ensureTournament();
+
+  // if no hand -> deal immediately
   if(!handInProgress || stage==="IDLE"){
-    setTimeout(()=>startHandAuto(), 150);
+    startHandAuto();
+    save();
     return;
   }
-  // else continue current hand
+
+  // else continue
   tick();
   save();
 }
@@ -1007,8 +1013,17 @@ function tick(){
     return;
   }
 
-  if(!handInProgress || stage==="IDLE" || stage==="SHOWDOWN"){
+  // ✅ If running but IDLE/no-hand -> auto start a hand
+  if(stage==="SHOWDOWN"){
     updateButtons();
+    return;
+  }
+  if(!handInProgress || stage==="IDLE"){
+    if(tournamentStarted && !menuOpen && !paused){
+      startHandAuto();
+    } else {
+      updateButtons();
+    }
     return;
   }
 
