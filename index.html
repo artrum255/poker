@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Simple Poker with Bots</title>
+<style>
+body {
+    background:#145a32;
+    color:white;
+    font-family:Arial, sans-serif;
+    text-align:center;
+}
+button {
+    font-size:16px;
+    margin:5px;
+    padding:6px 12px;
+}
+.card {
+    display:inline-block;
+    border:1px solid #fff;
+    border-radius:4px;
+    padding:4px 6px;
+    margin:2px;
+    background:#1e8449;
+}
+#table {
+    max-width:900px;
+    margin:auto;
+    text-align:left;
+}
+</style>
+</head>
+<body>
+
+<h2>Simple Poker (YOU vs Bots)</h2>
+
+<div id="table"></div>
+
+<br>
+<button onclick="start()">New Hand</button>
+<button onclick="fold()">Fold</button>
+<button onclick="callPlayer()">Call / Check</button>
+<button onclick="raisePlayer()">Raise</button>
+
+<script>
+const suits = ["♣","♦","♥","♠"];
+const ranks = ["2","3","4","5","6","7","8","9","T","J","Q","K","A"];
+
+let players = [];
+let deck = [];
+let board = [];
+let pot = 0;
+let toCall = 0;
+let stage = "IDLE";
+
+function newDeck(){
+    let d=[];
+    for(let s of suits)
+        for(let r of ranks)
+            d.push({r,s});
+    return d.sort(()=>Math.random()-0.5);
+}
+
+function strength(hole){
+    let v1 = ranks.indexOf(hole[0].r)+2;
+    let v2 = ranks.indexOf(hole[1].r)+2;
+    let pair = hole[0].r === hole[1].r;
+    let suited = hole[0].s === hole[1].s;
+    let high = Math.max(v1,v2);
+    let s = 0;
+    if(pair) s += 0.6;
+    if(suited) s += 0.1;
+    s += high/20;
+    return s;
+}
+
+function start(){
+    deck = newDeck();
+    board = [];
+    pot = 0;
+    toCall = 2;
+    stage = "PREFLOP";
+
+    players = [
+        {name:"YOU", bot:false, chips:100, bet:0, fold:false, hole:[deck.pop(),deck.pop()]},
+        {name:"BOT1", bot:true,  chips:100, bet:2, fold:false, hole:[deck.pop(),deck.pop()]},
+        {name:"BOT2", bot:true,  chips:100, bet:2, fold:false, hole:[deck.pop(),deck.pop()]}
+    ];
+    update();
+}
+
+function botAct(p){
+    if(p.fold) return;
+    let s = strength(p.hole);
+    if(s < 0.3 && Math.random() < 0.6){
+        p.fold = true;
+        return;
+    }
+    let need = Math.max(0, toCall - p.bet);
+    let pay = Math.min(need, p.chips);
+    p.chips -= pay;
+    p.bet += pay;
+    pot += pay;
+}
+
+function callPlayer(){
+    let p = players[0];
+    if(p.fold) return;
+    let need = Math.max(0, toCall - p.bet);
+    let pay = Math.min(need, p.chips);
+    p.chips -= pay;
+    p.bet += pay;
+    pot += pay;
+
+    players.slice(1).forEach(botAct);
+    nextStage();
+}
+
+function raisePlayer(){
+    let p = players[0];
+    if(p.fold) return;
+    let r = 4;
+    p.chips -= r;
+    p.bet += r;
+    pot += r;
+    toCall = p.bet;
+
+    players.slice(1).forEach(botAct);
+    nextStage();
+}
+
+function fold(){
+    players[0].fold = true;
+    update();
+}
+
+function nextStage(){
+    players.forEach(p=>p.bet=0);
+    if(stage==="PREFLOP"){
+        board.push(deck.pop(),deck.pop(),deck.pop());
+        stage="FLOP";
+    } else if(stage==="FLOP"){
+        board.push(deck.pop());
+        stage="TURN";
+    } else if(stage==="TURN"){
+        board.push(deck.pop());
+        stage="RIVER";
+    }
+    update();
+}
+
+function update(){
+    let t = `<b>Stage:</b> ${stage} | <b>Pot:</b> ${pot}<br>`;
+    t += `<b>Board:</b> ${board.map(c=>c.r+c.s).join(" ")}<br><br>`;
+    players.forEach(p=>{
+        t += `<b>${p.name}</b> (${p.chips}) `;
+        if(p.name==="YOU"){
+            t += p.hole.map(c=>`<span class="card">${c.r}${c.s}</span>`).join("");
+        } else {
+            t += "🂠🂠";
+        }
+        if(p.fold) t += " <i>FOLDED</i>";
+        t += "<br>";
+    });
+    document.getElementById("table").innerHTML = t;
+}
+</script>
+
+</body>
+</html>
